@@ -1,11 +1,13 @@
+import os
 import logging
+import asyncio
 from typing import Dict, Optional
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker, declarative_base
-from sqlalchemy import Column, Integer, String, Float, DateTime, Text, select
+from sqlalchemy import Column, Integer, String, Float, DateTime, Text, Boolean
 from sqlalchemy.sql import text
+from sqlalchemy.future import select
 from datetime import datetime, timedelta, timezone
-import os
 from dotenv import load_dotenv
 
 # 設置日誌
@@ -16,6 +18,15 @@ Base = declarative_base()
 
 # 時區設置
 TZ_UTC8 = timezone(timedelta(hours=8))
+
+_wallets_cache = {
+    "kol_wallets": set(),                  # KOL地址集合
+    "smart_wallets": set(),                # 一般聰明錢地址集合 (is_smart_wallet=True)
+    "high_value_smart_wallets": set(),     # 高淨值聰明錢地址集合 (is_smart_wallet=True and win_rate_30d>70)
+    "smart_wallets_win_rate": {},          # address: win_rate_30d 字典
+    "last_update": None
+}
+_CACHE_EXPIRE_SECONDS = 24 * 60 * 60  # 24小時
 
 def get_utc8_time():
     """獲取 UTC+8 當前時間"""
@@ -57,6 +68,30 @@ class CryptoInfo(Base):
     socials = Column(Text, nullable=True, comment='社交媒體資訊（JSON 格式）')
     created_at = Column(DateTime, nullable=False, default=get_utc8_time, comment='創建時間')
     updated_at = Column(DateTime, nullable=False, default=get_utc8_time, onupdate=get_utc8_time, comment='更新時間')
+
+    def as_dict(self):
+        return {c.name: getattr(self, c.name) for c in self.__table__.columns}
+    
+class Wallet(Base):
+    __tablename__ = 'wallet'
+    __table_args__ = {'schema': 'solana'}
+
+    id = Column(Integer, primary_key=True, comment='ID')
+    address = Column(String(100), nullable=False, unique=True, comment='錢包地址')
+    balance = Column(Float, nullable=True, comment='錢包餘額')
+    balance_USD = Column(Float, nullable=True, comment='錢包餘額 (USD)')
+    chain = Column(String(50), nullable=False, comment='區塊鏈類型')
+    tag = Column(String(50), nullable=True, comment='標籤')
+    twitter_name = Column(String(50), nullable=True, comment='X名稱')
+    twitter_username = Column(String(50), nullable=True, comment='X用戶名')
+    is_smart_wallet = Column(Boolean, nullable=True, comment='是否為聰明錢包')
+    wallet_type = Column(Integer, nullable=True, comment='0:一般聰明錢，1:pump聰明錢，2:moonshot聰明錢')
+    asset_multiple = Column(Float, nullable=True, comment='資產翻倍數(到小數第1位)')
+    token_list = Column(Text, nullable=True, comment='用户最近交易的三种代币信息')
+    win_rate_30d = Column(Float, nullable=True, comment='30日勝率') 
+    update_time = Column(DateTime, nullable=False, default=get_utc8_time, comment='更新時間')
+    last_transaction_time = Column(Integer, nullable=True, comment='最後活躍時間')
+    is_active = Column(Boolean, nullable=True, comment='是否還是聰明錢')
 
     def as_dict(self):
         return {c.name: getattr(self, c.name) for c in self.__table__.columns}
@@ -164,6 +199,45 @@ async def add_push_history(session, message_content: str, chat_ids: str, crypto_
     except Exception as e:
         logger.error(f"添加推送歷史時發生錯誤: {str(e)}")
         return False
+    
+async def refresh_wallets_cache():
+    """從資料庫查詢KOL、一般聰明錢、高淨值聰明錢，並更新快取"""
+    async with await get_session() as session:
+        # 查KOL
+        result = await session.execute(
+            select(Wallet.address).where(Wallet.tag == 'kol')
+        )
+        kol_wallets = set(row[0] for row in result.fetchall())
+        # 查所有聰明錢
+        result = await session.execute(
+            select(Wallet.address, Wallet.win_rate_30d).where(Wallet.is_smart_wallet == True)
+        )
+        smart_wallets = {row[0]: row[1] for row in result.fetchall()}
+        # 高淨值聰明錢
+        high_value_smart_wallets = set(addr for addr, win_rate in smart_wallets.items() if win_rate and win_rate > 70)
+    # 更新快取
+    print(f"更新快取: {len(kol_wallets)}, {len(smart_wallets)}, {len(high_value_smart_wallets)}")
+    _wallets_cache["kol_wallets"] = kol_wallets
+    _wallets_cache["smart_wallets"] = set(smart_wallets.keys())
+    _wallets_cache["high_value_smart_wallets"] = high_value_smart_wallets
+    _wallets_cache["smart_wallets_win_rate"] = smart_wallets  # address: win_rate
+    _wallets_cache["last_update"] = datetime.now()
+
+async def get_cached_wallets(force_refresh=False):
+    """獲取KOL、一般聰明錢、高淨值聰明錢快取，必要時自動刷新"""
+    now = datetime.now()
+    if (
+        force_refresh or
+        _wallets_cache["last_update"] is None or
+        (now - _wallets_cache["last_update"]).total_seconds() > _CACHE_EXPIRE_SECONDS
+    ):
+        await refresh_wallets_cache()
+    return (
+        _wallets_cache["kol_wallets"],
+        _wallets_cache["smart_wallets"],
+        _wallets_cache["high_value_smart_wallets"],
+        _wallets_cache["smart_wallets_win_rate"]
+    )
 
 async def main():
     """主函數，用於初始化資料庫和創建表"""

@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, Bot
 from telegram.ext import Application, CommandHandler, ContextTypes, Defaults
 from telegram.error import NetworkError, TimedOut, RetryAfter
-from templates import format_message
+from templates import format_message, load_templates
 
 # 導入自定義模型和數據庫函數
 import models
@@ -115,168 +115,7 @@ def fetch_crypto_data() -> Dict:
     }
     return data
 
-# def format_message(data: Dict) -> str:
-#     """將加密貨幣數據格式化為消息"""
-#     try:
-#         contract_security = json.loads(data['contract_security'])
-#         socials = json.loads(data['socials'])
-#     except (json.JSONDecodeError, KeyError) as e:
-#         logger.error(f"JSON 解析錯誤: {e}")
-#         contract_security = {}
-#         socials = {}
-
-#     contract_security_str = (
-#         f"- 权限：[{ '✅' if contract_security.get('authority', False) else '❌'}]  "
-#         f"貔貅: [{ '✅' if contract_security.get('rug_pull', False) else '❌'}]  "
-#         f"烧池子 [{ '✅' if contract_security.get('burn_pool', False) else '❌'}]  "
-#         f"黑名单 [{ '✅' if contract_security.get('blacklist', False) else '❌'}]"
-#     )
-
-#     # 構建推特搜索鏈接
-#     token_address = data.get('token_address', '')
-#     twitter_search_url = f"https://x.com/search?q={token_address}&src=typed_query"
-#     twitter_search_link = f"<a href='{twitter_search_url}'>👉查推特</a>"
-
-#     # 構建社交媒體鏈接 - 整体变成可点击链接
-#     twitter_part = "推特❌"
-#     if socials.get('twitter', False) and socials.get('twitter_url'):
-#         twitter_part = f"<a href='{socials['twitter_url']}'>推特✅</a>"
-
-#     website_part = "官网❌"
-#     if socials.get('website', False) and socials.get('website_url'):
-#         website_part = f"<a href='{socials['website_url']}'>官网✅</a>"
-
-#     telegram_part = f"电报{'✅' if socials.get('telegram', False) else '❌'}"
-
-#     socials_str = f"🔗 {twitter_part} || {website_part} || {telegram_part} || {twitter_search_link}"
-
-#     dev_status_line = ""
-#     if data.get('dev_status_display') and data.get('dev_status_display') != '--':
-#         dev_status_line = f"- {data.get('dev_status_display')}\n"
-
-#     # 構建可複製的 token_address
-#     copyable_address = f"<code>{token_address}</code>"
-
-#     message = (
-#         f"🟢 [MOONX] 🟢 新币上线 / 异动播报 🪙  :\n"
-#         f"├ ${data.get('token_symbol', 'Unknown')} - {data.get('chain', 'Unknown')}\n"
-#         f"├ {copyable_address}\n"
-#         f"💊 当前市值：{data.get('market_cap_display', '--')}\n"
-#         f"💰 当前价格：$ {data.get('price_display', '--')}\n"
-#         f"👬 持币人：{data.get('holders_display', '--')}\n"
-#         f"⏳ 开盘时间： [{data.get('launch_time_display', '--')}] \n"        
-#         f"——————————————————\n"
-#         f"🔍 链上监控\n"
-#         f"聪明钱 {data.get('total_addr_amount', '0')} 笔买入 (15分钟内)\n"
-#         f"合约安全：\n"
-#         f"{contract_security_str}\n"        
-#         f"💰 开发者：\n"
-#         f"{dev_status_line}"
-#         f"- 开发者余额：{data.get('dev_wallet_balance_display', '--')} SOL \n"
-#         f"- Top10占比：{data.get('top10_holding_display', '--')}%\n"
-#         f"🌐 社交与工具\n{socials_str}\n"
-#         f"——————————————————\n"
-#         f"🚨 MOONX 社区提示\n"
-#         f"- 防范Rug Pull，务必验证合约权限与流动性锁仓。\n"
-#         f"- 关注社区公告，欢迎分享观点与资讯。\n"
-#     )
-#     return message
-
-# async def push_to_channel(context: ContextTypes.DEFAULT_TYPE, message: str, crypto_id: Optional[int] = None, session=None) -> bool:
-#     """推送消息到指定頻道，带有重试机制"""
-#     should_close_session = False
-#     if session is None:
-#         session = await models.get_session()
-#         should_close_session = True
-
-#     try:
-#         if not CHANNEL_ID:
-#             logger.error("未設置頻道 ID，無法推送消息")
-#             return False
-
-#         # 從消息中提取 token_address
-#         token_address = None
-#         for line in message.split('\n'):
-#             if '<code>' in line and '</code>' in line:
-#                 # 提取 <code> 標籤中的內容
-#                 start = line.find('<code>') + 6
-#                 end = line.find('</code>')
-#                 token_address = line[start:end].strip()
-#                 break
-
-#         # 構建交易鏈接
-#         trade_url = f"https://www.bydfi.com/en/moonx/solana/token?address={token_address}"
-#         keyboard = [
-#             [
-#                 InlineKeyboardButton("⚡️一键交易⬆️", url=trade_url),
-#                 InlineKeyboardButton("👉查K线⬆️", url=trade_url)
-#             ]
-#         ]
-#         reply_markup = InlineKeyboardMarkup(keyboard)
-
-#         # 添加重試機制
-#         max_retries = 3
-#         retry_delay = 2
-#         success = False
-#         error_message = None
-
-#         for attempt in range(max_retries):
-#             try:
-#                 # 使用 Bot 類直接創建實例，不設置額外的超時參數
-#                 bot = Bot(token=BOT_TOKEN)
-
-#                 # 發送消息
-#                 await bot.send_message(
-#                     chat_id=CHANNEL_ID,
-#                     text=message,
-#                     reply_markup=reply_markup,
-#                     parse_mode='HTML'
-#                 )
-
-#                 logger.info(f"消息已發送到頻道 {CHANNEL_ID}")
-#                 success = True
-#                 break  # 成功發送，跳出重試循環
-
-#             except (NetworkError, TimedOut) as e:
-#                 # 網絡錯誤，等待一段時間後重試
-#                 error_message = f"網絡錯誤: {str(e)}"
-#                 logger.warning(f"第 {attempt+1} 次嘗試發送消息失敗: {error_message}，等待 {retry_delay} 秒後重試")
-#                 await asyncio.sleep(retry_delay)
-#                 retry_delay *= 2  # 指數退避策略
-
-#             except RetryAfter as e:
-#                 # API 限流，等待指定的時間後重試
-#                 retry_after = e.retry_after
-#                 error_message = f"API 限流，需要等待 {retry_after} 秒"
-#                 logger.warning(f"第 {attempt+1} 次嘗試發送消息失敗: {error_message}")
-#                 await asyncio.sleep(retry_after)
-
-#             except Exception as e:
-#                 # 其他錯誤
-#                 error_message = str(e)
-#                 logger.error(f"無法發送消息到頻道 {CHANNEL_ID}: {error_message}")
-#                 break  # 非預期錯誤，不重試
-
-#         # 記錄推送歷史
-#         await models.add_push_history(
-#             session,
-#             message_content=message,
-#             chat_ids=json.dumps([CHANNEL_ID]),
-#             crypto_id=crypto_id,
-#             status="success" if success else "failed",
-#             error_message=error_message
-#         )
-#         await session.commit()
-#         return success
-#     except Exception as e:
-#         logger.error(f"推送過程中發生錯誤: {e}")
-#         await session.rollback()
-#         return False
-#     finally:
-#         if should_close_session:
-#             await session.close()
-
-async def push_to_channel(context: ContextTypes.DEFAULT_TYPE, message: str, crypto_id: Optional[int] = None, session=None) -> bool:
+async def push_to_channel(context: ContextTypes.DEFAULT_TYPE, message: str, crypto_id: Optional[int] = None, session=None, language: str = "zh") -> bool:
     """推送消息到指定頻道或主題，带有重试机制"""
     should_close_session = False
     if session is None:
@@ -317,10 +156,17 @@ async def push_to_channel(context: ContextTypes.DEFAULT_TYPE, message: str, cryp
 
         # 構建交易鏈接
         trade_url = f"https://www.bydfi.com/en/moonx/solana/token?address={token_address}"
+
+        # 根據語言獲取按鈕文本
+        templates = load_templates()
+        lang_templates = templates.get(language, templates.get("zh"))
+        trade_button_text = lang_templates.get("trade_button", "⚡️一键交易⬆️")
+        chart_button_text = lang_templates.get("chart_button", "👉查K线⬆️")
+
         keyboard = [
             [
-                InlineKeyboardButton("⚡️一键交易⬆️", url=trade_url),
-                InlineKeyboardButton("👉查K线⬆️", url=trade_url)
+                InlineKeyboardButton(trade_button_text, url=trade_url),
+                InlineKeyboardButton(chart_button_text, url=trade_url)
             ]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -397,59 +243,61 @@ async def push_to_channel(context: ContextTypes.DEFAULT_TYPE, message: str, cryp
         if should_close_session:
             await session.close()
 
-async def push_to_all_language_channels(context: ContextTypes.DEFAULT_TYPE, crypto_data: Dict, session=None) -> Dict[str, bool]:
-    """同時向所有語言主題推送加密貨幣資訊"""
+async def push_to_all_language_channels(context: ContextTypes.DEFAULT_TYPE, crypto_data: Dict, session=None, is_low_frequency: bool = False) -> Dict[str, bool]:
+    """同時向所有語言主題推送加密貨幣資訊，支持高频和低频信号"""
     results = {}
     
     # 從環境變數加載語言群組配置
     language_groups = json.loads(os.getenv("LANGUAGE_GROUPS", "{}"))
     
-    # 如果配置為空，回退到原始頻道
     if not language_groups:
         message = format_message(crypto_data)
-        result = await push_to_channel(context, message, crypto_data.get("id"), session)
+        result = await push_to_channel(context, message, crypto_data.get("id"), session, language="zh")
         return {"default": result}
     
-    # 保存會話管理狀態
     should_close_session = False
     if session is None:
         session = await models.get_session()
         should_close_session = True
     
     try:
-        # 保存原始環境變數
         original_group_id = os.getenv("GROUP_ID")
         original_topic_id = os.getenv("TOPIC_ID")
         
-        # 為每種語言創建并發送消息
         for language, target in language_groups.items():
             try:
-                # 臨時設置環境變數為目標語言的頻道/群組
-                group_id = target.get("group_id")
-                topic_id = target.get("topic_id")
+                if is_low_frequency:
+                    group_id = target.get("low_freq_group_id") or target.get("group_id")
+                    topic_id = target.get("low_freq_topic_id") or target.get("topic_id")
+                else:
+                    group_id = target.get("high_freq_group_id") or target.get("group_id")
+                    topic_id = target.get("high_freq_topic_id") or target.get("topic_id")
                 
-                # 使用 os.environ 動態設置環境變數
                 if group_id:
                     os.environ["GROUP_ID"] = group_id
                 if topic_id:
                     os.environ["TOPIC_ID"] = topic_id
                 
-                # 格式化該語言的消息
-                message = format_message(crypto_data, language)
+                if is_low_frequency:
+                    from templates import format_premium_message
+                    message = format_premium_message(crypto_data, language)
+                else:
+                    from templates import format_message
+                    message = format_message(crypto_data, language)
                 
-                # 使用現有的 push_to_channel 函數發送消息
                 success = await push_to_channel(
                     context, 
                     message, 
                     crypto_data.get("id"), 
-                    session
+                    session,
+                    language=language
                 )
                 
                 results[language] = success
-                logger.info(f"向 {language} 主題推送消息: {'成功' if success else '失敗'}")
+                logger.info(f"向 {language} 主題推送{'低频' if is_low_frequency else '高频'}信號: {'成功' if success else '失敗'}")
                 
             except Exception as e:
-                logger.error(f"向 {language} 主題推送消息時發生錯誤: {e}")
+                logger.error(f"向 {language} 主題推送{'低频' if is_low_frequency else '高频'}信號時發生錯誤: {e}")
                 results[language] = False
         
         # 恢復原始環境變數
