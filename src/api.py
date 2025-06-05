@@ -1,1168 +1,516 @@
-from quart import Quart, request, jsonify
-import asyncio
-import logging
-from typing import Dict, Optional, List
-from quart_cors import cors
-import json
-from main import push_to_channel, format_message, init_bot
-from models import get_session, add_crypto_info, get_cached_wallets
 import os
+import json
+import httpx
+import logging
+import asyncio
+import traceback
+from typing import Dict, Optional
 from dotenv import load_dotenv
-import aiohttp
-from datetime import datetime, timezone, timedelta
-import threading
-import time
-import base58
-from solana.rpc.async_api import AsyncClient
-from solders.pubkey import Pubkey
-from main import push_to_all_language_channels
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, Bot
+from telegram.ext import Application, CommandHandler, ContextTypes, Defaults
+from telegram.error import NetworkError, TimedOut, RetryAfter
+from templates import format_message, load_templates
 
-# 設置日誌
-logger = logging.getLogger(__name__)
+# 導入自定義模型和數據庫函數
+import models
 
 # 載入環境變數
 load_dotenv(override=True)
+
+# 設置日誌
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO,
+    handlers=[
+        logging.StreamHandler()  # 只輸出到控制台
+    ]
+)
+
+# 設置 httpx 的日誌級別為 WARNING，這樣就不會顯示 HTTP 請求日誌
+logging.getLogger('httpx').setLevel(logging.WARNING)
+logging.getLogger('telegram').setLevel(logging.WARNING)
+
+logger = logging.getLogger(__name__)
+
+# 確認環境變數是否正確載入
+DATABASE_URI = os.getenv("DATABASE_URI_TELEGRAM")
+BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 CHANNEL_ID = os.getenv("ANNOUNCEMENT_CHANNEL_ID")
-SOLSCAN_API_TOKEN = os.getenv("SOLSCAN_API_TOKEN")
-INTERNAL_API_URL = os.getenv("INTERNAL_API_URL", "http://moonx.backend:4200")
-RPC_URL = os.getenv("RPC_URL")
-RPC_URL_BACKUP = os.getenv("RPC_URL_backup")
-LOCAL = os.getenv("LOCAL")
-SMART_MONEY = os.getenv("SMART_MONEY")
-
-# 創建應用實例
-app = Quart(__name__)
-app = cors(app, allow_origin="*")
-
-# 用于避免重複處理相同代幣的集合
-processed_tokens = set()
-processing_lock = asyncio.Lock()
-
-# 存儲任務對象
-app_tasks = {}
-
-# 處理隊列資料結構，使用列表代替 asyncio.Queue
-token_queue = []
-queue_lock = threading.Lock()
-
-# 心跳任務
-async def heartbeat():
-    """每10分鐘執行一次的心跳任務"""
-    try:
-        while True:
-            logger.info("API 心跳檢查 - 服務正常運行中")
-            await asyncio.sleep(600)  # 10分鐘 = 600秒
-    except asyncio.CancelledError:
-        logger.info("心跳任務已停止")
-        raise
-
-async def token_processor():
-    """處理隊列中的代幣任務"""
-    try:
-        while True:
-            task = None
-            with queue_lock:
-                if token_queue:
-                    task = token_queue.pop(0)
-
-            if task:
-                # 根據任務類型處理
-                if task.get('type') == 'premium':
-                    # 處理 premium 類型的任務
-                    data = task['data']
-                    token_address = data['token_address']
-                    chain = data['chain']
-                    market_cap_level = data['market_cap_level']
-                    open_time = data['open_time']
-                    token_price = float(data['token_price'])
-                    is_low_frequency = True
-                else:
-                    # 處理普通類型的任務
-                    token_address = task['token_address']
-                    chain = task['chain']
-                    is_low_frequency = False
-
-                # 檢查是否已經處理過
-                should_process = True
-                # async with processing_lock:
-                #     if token_address in processed_tokens:
-                #         logger.info(f"跳過已處理的代幣: {token_address}")
-                #         should_process = False
-                #     else:
-                #         processed_tokens.add(token_address)
-
-                if should_process:
-                    logger.info(f"開始處理代幣: chain={chain}, address={token_address}")
-
-                    try:
-                        # 根據任務類型選擇不同的處理函數
-                        if task.get('type') == 'premium':
-                            crypto_data = await fetch_token_info_premium(token_address, token_price)
-                        else:
-                            crypto_data = await fetch_token_info(token_address)
-
-                        if not crypto_data:
-                            logger.error(f"無法獲取代幣信息: {token_address}")
-                            continue
-
-                        # 創建會話
-                        session = await get_session()
-                        try:
-                            # 儲存加密貨幣資訊
-                            crypto_id = await add_crypto_info(session, crypto_data)
-                            if crypto_id is None:
-                                logger.error(f"無法保存加密貨幣信息: {token_address}")
-                                continue
-
-                            # 設置 ID
-                            crypto_data["id"] = crypto_id
-
-                            # 如果是 premium 任務，添加額外信息
-                            if task.get('type') == 'premium':
-                                crypto_data['market_cap_level'] = market_cap_level
-                                crypto_data['open_time'] = open_time
-
-                            # 模擬 context 對象
-                            class FakeContext:
-                                def __init__(self):
-                                    self.bot = None
-
-                            # 統一使用 push_to_all_language_channels，根據任務類型設置 is_low_frequency
-                            results = await push_to_all_language_channels(
-                                FakeContext(), 
-                                crypto_data, 
-                                session, 
-                                is_low_frequency=is_low_frequency
-                            )
-
-                            # 檢查結果
-                            if "error" in results:
-                                logger.error(f"推送過程中發生錯誤: {results['error']}")
-                            else:
-                                success_count = sum(1 for success in results.values() if success)
-                                total_count = len(results)
-                                if success_count == total_count:
-                                    logger.info(f"成功推送代幣通知: {token_address}")
-                                else:
-                                    logger.warning(f"部分推送失敗: 成功 {success_count}/{total_count} 個語言群組: {token_address}")
-
-                        except Exception as e:
-                            logger.error(f"處理代幣 {token_address} 時發生錯誤: {e}")
-                            await session.rollback()
-                        finally:
-                            await session.close()
-                    except Exception as e:
-                        logger.error(f"處理代幣任務時發生錯誤: {e}")
-
-            # 休息一下，避免 CPU 佔用過高
-            await asyncio.sleep(0.1)
-
-    except asyncio.CancelledError:
-        logger.info("代幣處理任務已取消")
-        raise
-    except Exception as e:
-        logger.error(f"代幣處理器發生致命錯誤: {e}")
-        raise
-
-# 定期清理已處理代幣的任務
-async def cleanup_processed_tokens():
-    """每小時清理一次已處理的代幣集合，避免內存泄漏"""
-    try:
-        while True:
-            await asyncio.sleep(3600)  # 每小時執行一次
-
-            async with processing_lock:
-                token_count = len(processed_tokens)
-                processed_tokens.clear()
-
-            logger.info(f"已清理已處理代幣集合，清理前數量: {token_count}")
-    except asyncio.CancelledError:
-        logger.info("清理任務已取消")
-        raise
-
-@app.before_serving
-async def startup():
-    """在API啟動前啟動心跳任務和代幣處理任務"""
-    # 獲取當前事件循環
-    loop = asyncio.get_running_loop()
-
-    # 創建並啟動所有後台任務
-    app_tasks['heartbeat'] = loop.create_task(heartbeat())
-    app_tasks['token_processor'] = loop.create_task(token_processor())
-    app_tasks['cleanup'] = loop.create_task(cleanup_processed_tokens())
-
-    logger.info("心跳監控和代幣處理任務已啟動")
-
-@app.after_serving
-async def shutdown():
-    """在API關閉時清理所有任務"""
-    # 取消所有任務
-    for name, task in app_tasks.items():
-        if not task.done():
-            logger.info(f"正在取消任務: {name}")
-            task.cancel()
-
-    # 等待所有任務完成
-    if app_tasks:
-        await asyncio.gather(*app_tasks.values(), return_exceptions=True)
-        app_tasks.clear()
-
-    logger.info("所有後台任務已停止")
-
-async def check_token_exists(session: aiohttp.ClientSession, token_address: str) -> bool:
-    """檢查代幣是否存在於內部 API"""
-    internal_url = f"{INTERNAL_API_URL}/internal/token_info"
-    params = {
-        "network": "SOLANA",
-        "tokenAddress": token_address,
-        "brand": "BYD"
-    }
-
-    logger.info(f"正在檢查代幣是否存在: {internal_url} with params: {params}")
-    try:
-        async with session.get(internal_url, params=params) as response:
-            if response.status != 200:
-                logger.error(f"內部 API 請求失敗: {response.status}")
-                return False
-
-            data = await response.json()
-
-            # 如果返回的數據中沒有 data 字段，表示代幣不存在
-            if data.get("code") == 200 and not data.get("data"):
-                logger.info(f"代幣不存在: {token_address}")
-                return False
-
-            return True
-    except Exception as e:
-        logger.error(f"檢查代幣時發生錯誤: {e}")
-        return False
-
-async def fetch_token_info(token_address: str) -> Optional[Dict]:
-    """從 Solscan API 和內部 API 獲取代幣信息"""
-    async with aiohttp.ClientSession() as session:
-        # 從內部 API 獲取數據
-        internal_url = f"{INTERNAL_API_URL}/internal/token_info"
-        params = {
-            "network": "SOLANA",
-            "tokenAddress": token_address,
-            "brand": "BYD"
-        }
-        
-        try:
-            async with session.get(internal_url, params=params) as internal_response:
-                if internal_response.status != 200:
-                    logger.error(f"內部 API 請求失敗: {internal_response.status}")
-                    return None
-                
-                internal_data = await internal_response.json()
-                
-                # 如果返回的數據中沒有 data 字段，表示代幣不存在
-                if internal_data.get("code") == 200 and not internal_data.get("data"):
-                    logger.info(f"代幣不存在: {token_address}")
-                    return None
-        except Exception as e:
-            logger.error(f"從內部 API 獲取數據時發生錯誤: {e}")
-            return None
-
-        # 從 Solscan API 獲取基本信息
-        url = f"https://pro-api.solscan.io/v2.0/token/meta?address={token_address}"
-        headers = {"token": SOLSCAN_API_TOKEN}
-
-        async with session.get(url, headers=headers) as response:
-            if response.status != 200:
-                logger.error(f"從 Solscan API 獲取數據失敗: {response.status}")
-                return None
-
-            solscan_data = await response.json()
-
-            if not solscan_data.get("success") or "data" not in solscan_data:
-                logger.error("Solscan API 返回無效數據")
-                return None
-
-            token_data = solscan_data["data"]
-            # logger.info(f"Solscan 返回數據: {token_data}")
-            
-            # 檢查必要字段
-            if token_data.get("price") is None or token_data.get("symbol") is None:
-                return None
-                
-            # 如果沒有 market_cap，嘗試計算
-            if token_data.get("market_cap") is None and token_data.get("price") is not None and token_data.get("supply") is not None:
-                try:
-                    price = float(token_data["price"])
-                    supply = float(token_data["supply"])
-                    token_data["market_cap"] = price * supply
-                except (ValueError, TypeError):
-                    logger.error("無法計算市值")
-                    return None
-
-            # 獲取社交媒體連結
-            has_twitter = False
-            has_website = False
-            twitter_url = None
-            website_url = None
-
-            # 從 metadata 中獲取社交媒體連結
-            if "metadata" in token_data and token_data["metadata"]:
-                metadata = token_data["metadata"]
-
-                if "twitter" in metadata and metadata["twitter"]:
-                    has_twitter = True
-                    twitter_url = metadata["twitter"]
-                    # 確保 Twitter URL 格式正確
-                    if not twitter_url.startswith(("http://", "https://")):
-                        twitter_url = f"https://{twitter_url}"
-
-                if "website" in metadata and metadata["website"]:
-                    has_website = True
-                    website_url = metadata["website"]
-                    # 確保 Website URL 格式正確
-                    if not website_url.startswith(("http://", "https://")):
-                        website_url = f"https://{website_url}"
-
-            # 獲取創建者錢包餘額
-            dev_wallet_balance = 0.0
-            if "creator" in token_data and token_data["creator"]:
-                creator_address = token_data["creator"]
-                try:
-                    dev_wallet_balance = await get_sol_balance(creator_address)
-                except Exception as e:
-                    logger.error(f"獲取創建者錢包餘額時出錯: {e}")
-
-            # 處理內部 API 數據
-            risk_items = {}
-            top10_holding = None
-            top10_holding_display = "--"
-            dev_status = None
-            dev_status_display = "--"
-            if internal_data and internal_data.get("code") == 200 and "data" in internal_data:
-                internal_token_data = internal_data["data"]
-                dev_status = internal_token_data.get("devStatus")
-
-                if dev_status is not None:
-                    dev_status_map = {
-                        0: "DEV持有",
-                        1: "DEV减仓",
-                        2: "DEV加仓",
-                        3: "DEV清仓",
-                        4: "DEV加池子",
-                        5: "DEV烧池子"
-                    }
-                    dev_status_display = dev_status_map.get(dev_status, "--")
-
-                # 優先從 baseTop10Percent 獲取 top10 持有比例
-                if "baseTop10Percent" in internal_token_data:
-                    try:
-                        top10_holding = float(internal_token_data.get("baseTop10Percent", 0))
-                        # 格式化為普通數字，避免科學計數法
-                        top10_holding_display = f"{top10_holding:.2f}"
-                    except (ValueError, TypeError):
-                        logger.warning(f"無法解析 baseTop10Percent: {internal_token_data.get('baseTop10Percent')}")
-
-                # 解析 riskItem JSON 字符串
-                try:
-                    # 初始化風險項目（默認都是不安全的）
-                    risk_items = {
-                        "authority": False,  # 權限檢查 - 默認不安全
-                        "rug_pull": False,   # 貔貅檢查 - 默認不安全
-                        "burn_pool": False,  # 資金池鎖定檢查 - 默認不安全
-                        "blacklist": False   # 黑名單檢查 - 默認不安全
-                    }
-
-                    # 項目代碼到風險類型的映射
-                    primary_code_map = {
-                        "PERMISSION_RENOUNCED": "authority",
-                        "NOT_PIKS": "rug_pull",
-                        "LP_LOCKED": "burn_pool",
-                        "NO_BLACKLIST": "blacklist"
-                    }
-
-                    # 解析風險項目列表
-                    risk_items_list = json.loads(internal_token_data.get("riskItem", "[]"))
-                    # logger.info(f"風險項目列表: {risk_items_list}")
-
-                    # 存在的項目代碼集合
-                    existing_codes = {item.get("code") for item in risk_items_list}
-
-                    # 如果上面沒獲取到 top10_holding，從風險項目列表中查找
-                    if top10_holding is None:
-                        for item in risk_items_list:
-                            if item.get("code") == "TOP_10_HOLDER_PERCENTAGE":
-                                try:
-                                    top10_holding = float(item.get("value", "0"))
-                                    # 格式化為普通數字，避免科學計數法
-                                    top10_holding_display = f"{top10_holding:.2f}"
-                                except (ValueError, TypeError):
-                                    top10_holding = None
-                                    top10_holding_display = "--"
-                                break
-
-                    # 首先處理主要的安全參數
-                    for item in risk_items_list:
-                        code = item.get("code")
-                        if code in primary_code_map:
-                            risk_type = primary_code_map[code]
-                            risk_items[risk_type] = item.get("riskStatus") == "PASS"
-                except json.JSONDecodeError as e:
-                    logger.error(f"解析 riskItem 時發生錯誤: {e}")
-
-            # 轉換時間戳為 UTC+8 格式
-            created_time = token_data.get("created_time")
-            if created_time:
-                dt = datetime.fromtimestamp(created_time, tz=timezone.utc)
-                dt_utc8 = dt.astimezone(timezone(timedelta(hours=8)))
-                formatted_time = dt_utc8.strftime("%Y.%m.%d %H:%M:%S")
-                launch_time = dt_utc8.replace(tzinfo=None)  # 數據庫存儲用
-            else:
-                formatted_time = "--"
-                launch_time = None
-
-            # 準備顯示和存儲的數據
-            market_cap = token_data.get("market_cap")
-            price = token_data.get("price")
-            holders = token_data.get("holder")
-
-            token_name = token_data.get("name", "Unknown")
-            token_symbol = token_data.get("symbol", "Unknown")
-
-            # 确保它们都不为空
-            if not token_name or token_name.strip() == "":
-                token_name = token_symbol  # 使用symbol作为备选
-            if not token_symbol or token_symbol.strip() == "":
-                token_symbol = token_name  # 使用name作为备选
-
-            # 去除空格
-            token_name = token_name.strip()
-            token_symbol = token_symbol.strip()
-
-            # 格式化數值顯示（避免科學計數法）
-            market_cap_display = "--"
-            price_display = "--"
-            holders_display = "--"
-            dev_wallet_balance_display = "0"
-
-            if market_cap is not None:
-                # 格式化市值显示，使用K、M、B表示
-                if market_cap >= 1_000_000_000:  # 十亿及以上用B
-                    market_cap_display = f"$ {market_cap / 1_000_000_000:.2f}B".rstrip('0').rstrip('.')
-                    if market_cap_display.endswith('.'):
-                        market_cap_display = market_cap_display[:-1]
-                elif market_cap >= 1_000_000:  # 百万及以上用M
-                    market_cap_display = f"$ {market_cap / 1_000_000:.2f}M".rstrip('0').rstrip('.')
-                    if market_cap_display.endswith('.'):
-                        market_cap_display = market_cap_display[:-1]
-                elif market_cap >= 10_000:  # 万及以上用K
-                    market_cap_display = f"$ {market_cap / 1_000:.2f}K".rstrip('0').rstrip('.')
-                    if market_cap_display.endswith('.'):
-                        market_cap_display = market_cap_display[:-1]
-                else:  # 小于一万直接显示
-                    market_cap_display = f"$ {market_cap:,.2f}".rstrip('0').rstrip('.')
-                    if market_cap_display.endswith('.'):
-                        market_cap_display = market_cap_display[:-1]
-
-            if price is not None:
-                # 处理非常小的数字，避免科学计数法
-                if price < 0.0001:
-                    # 查找第一个非零位
-                    str_price = str(price)
-                    decimal_places = 8
-
-                    # 对于非常小的数字，寻找第一个非零数字
-                    if "e-" in str_price:  # 科学计数法
-                        # 提取指数
-                        exponent = int(str_price.split("e-")[1])
-                        # 设置足够的小数位
-                        decimal_places = exponent + 2  # 多显示一两位有效数字
-
-                    price_display = f"{price:.{decimal_places}f}".rstrip('0').rstrip('.')
-                    if price_display == "":
-                        price_display = "0"
-                else:
-                    # 一般数字，显示足够的小数位
-                    price_display = f"{price:.6f}".rstrip('0').rstrip('.')
-                    if price_display == "":
-                        price_display = "0"
-
-            if holders is not None:
-                # 持幣人數為整數，使用千分位格式
-                holders_display = f"{holders:,}"
-
-            if dev_wallet_balance:
-                # 開發者錢包餘額，特殊格式化小數點後多個零的情況
-                str_balance = str(dev_wallet_balance)
-                if '.' in str_balance:
-                    integer_part, decimal_part = str_balance.split('.')
-                    
-                    # 计算小数点后连续的零的个数
-                    zero_count = 0
-                    for char in decimal_part:
-                        if char == '0':
-                            zero_count += 1
-                        else:
-                            break
-                    
-                    # 如果小数点后有超过3个连续的零
-                    if zero_count > 3:
-                        # 找到第一个非零数字的位置
-                        non_zero_pos = decimal_part.find(next(filter(lambda x: x != '0', decimal_part), ''))
-                        if non_zero_pos != -1:
-                            # 格式化为 "整数.0{零的数量}非零部分"
-                            dev_wallet_balance_display = f"{integer_part}.0{{{zero_count}}}{decimal_part[zero_count:]}"
-                        else:
-                            # 如果小数部分全是零
-                            dev_wallet_balance_display = f"{integer_part}.0"
-                    else:
-                        # 如果零的数量不多，正常显示两位小数
-                        dev_wallet_balance_display = f"{dev_wallet_balance:.2f}"
-                else:
-                    # 如果没有小数部分
-                    dev_wallet_balance_display = f"{dev_wallet_balance:.2f}"
-
-            # 構建社交媒體信息 JSON
-            socials_json = {
-                "twitter": has_twitter,
-                "website": has_website,
-                "telegram": False,  # 默認沒有 Telegram
-                "twitter_search": True,  # 總是可以搜索 Twitter
-                "twitter_url": twitter_url,
-                "website_url": website_url
-            }
-            # ------------------------------------------------聰明錢動態------------------------------------------------
-            total_addr_amount = 0
-            try:
-                async with aiohttp.ClientSession() as smart_money_session:
-                    url = f"http://{SMART_MONEY}:5041/robots/smartmoney/tokentrend"
-                    payload = {
-                        "chain": "SOLANA",
-                        "token_addresses": [token_address],
-                        "time": 900  # 15分钟
-                    }
-
-                    async with smart_money_session.post(url, json=payload) as response:
-                        if response.status == 200:
-                            smart_money_data = await response.json()
-                            if smart_money_data.get("code") == 200 and smart_money_data.get("data"):
-                                # 获取第一条数据（因为我们只查询了一个token）
-                                token_data = smart_money_data["data"][0]
-                                total_addr_amount = str(token_data.get("total_addr_amount", 0))
-                                logger.info(f"获取到智能钱数据: {total_addr_amount}名聪明钱")
-            except Exception as e:
-                logger.error(f"获取智能钱活动时出错: {e}")
-
-            return {
-                "token_name": token_name,
-                "token_symbol": token_symbol,
-                "chain": "Solana",
-                "contract_address": token_address,
-                # 數據庫存儲值
-                "market_cap": market_cap if market_cap is not None else None,
-                "price": price if price is not None else None,
-                "holders": holders if holders is not None else None,
-                "launch_time": launch_time,
-                "smart_money_activity": None,
-                "top10_holding": top10_holding,
-                "dev_status": dev_status,
-                "dev_status_display": dev_status_display,
-                "dev_wallet_balance": dev_wallet_balance,
-                # 顯示值（用於消息格式化）
-                "market_cap_display": market_cap_display,
-                "price_display": price_display,
-                "holders_display": holders_display,
-                "launch_time_display": formatted_time,
-                "total_addr_amount": total_addr_amount,
-                "top10_holding_display": top10_holding_display,
-                "dev_holding_at_launch_display": "--",
-                "dev_holding_current_display": "--",
-                "dev_wallet_balance_display": dev_wallet_balance_display,
-                "contract_security": json.dumps({
-                    "authority": risk_items.get("authority", False),
-                    "rug_pull": risk_items.get("rug_pull", False),
-                    "burn_pool": risk_items.get("burn_pool", False),
-                    "blacklist": risk_items.get("blacklist", False)
-                }),
-                "socials": json.dumps(socials_json),
-                "token_address": token_address
-            }
-
-async def fetch_token_info_premium(token_address: str, token_price: float) -> Optional[Dict]:
-    """從 Solscan API 和內部 API 獲取代幣信息"""
-    # 初始化 crypto_data 字典
-    crypto_data = {
-        "token_name": "",
-        "token_symbol": "",
+GROUP_ID = os.getenv("GROUP_ID")
+TOPIC_ID = os.getenv("TOPIC_ID")
+
+if not DATABASE_URI or not BOT_TOKEN:
+    logger.error("環境變數缺失! 請確認 .env 文件包含 DATABASE_URI_TELEGRAM 和 TELEGRAM_BOT_TOKEN")
+    exit(1)
+
+if not CHANNEL_ID:
+    logger.warning("未設置 ANNOUNCEMENT_CHANNEL_ID 環境變數，推送消息將無法發送")
+
+if not DATABASE_URI or not BOT_TOKEN:
+    logger.error("環境變數缺失! 請確認 .env 文件包含 DATABASE_URI_TELEGRAM 和 TELEGRAM_BOT_TOKEN")
+    exit(1)
+
+if not GROUP_ID or not TOPIC_ID:
+    logger.warning("未設置 GROUP_ID 或 TOPIC_ID 環境變數，主題推送可能無法正常工作")
+
+logger.info(f"DATABASE_URI_TELEGRAM: {DATABASE_URI}")
+logger.info(f"GROUP_ID: {GROUP_ID}, TOPIC_ID: {TOPIC_ID}")
+logger.info(f"DATABASE_URI_TELEGRAM: {DATABASE_URI}")
+logger.info(f"ANNOUNCEMENT_CHANNEL_ID: {CHANNEL_ID}")
+
+# 全局 bot 應用實例
+bot_app = None
+
+def init_bot():
+    """初始化 bot 應用"""
+    global bot_app
+    if bot_app is None:
+        # 創建 Application 實例 - 嘗試使用其他方式設置超時
+        bot_app = (
+            Application.builder()
+            .token(BOT_TOKEN)
+            .build()
+        )
+
+        # 註冊命令處理器
+        bot_app.add_handler(CommandHandler("start", start))
+        bot_app.add_handler(CommandHandler("help", help_command))
+        bot_app.add_handler(CommandHandler("push", push))
+        bot_app.add_handler(CommandHandler("test_multilang", test_multilang))
+        # 註冊錯誤處理器
+        bot_app.add_error_handler(error_handler)
+
+        logger.info("Bot 初始化完成")
+    return bot_app
+
+# 加密貨幣數據處理
+def fetch_crypto_data() -> Dict:
+    """從 API 獲取加密貨幣數據"""
+    # 模擬從 API 拉取數據
+    data = {
+        "token_symbol": "BBL(BBL Sheep)",
         "chain": "Solana",
-        "contract_address": token_address,
-        "price": token_price,
-        "holders": None,
-        "launch_time": None,
-        "smart_money_activity": None,
-        "top10_holding": None,
-        "dev_status": None,
-        "dev_status_display": "--",
-        "market_cap_display": "--",
-        "price_display": "--",
-        "holders_display": "--",
-        "launch_time_display": "--",
-        "total_addr_amount": "0",
-        "top10_holding_display": "--",
-        "dev_holding_at_launch_display": "--",
-        "dev_holding_current_display": "--",
-        "dev_wallet_balance_display": "0",
-        "contract_security": "{}",
-        "socials": "{}",
-        "token_address": token_address,
-        "highlight_tag_codes": []  # 初始化為空列表
+        "token_address": "GKuH7SzV6mYc3RmAsYF7sit7QMfK6oj1c1BP59hQpump",
+        "market_cap": 540700,
+        "price": 0.00067,
+        "holders": 234,
+        "launch_time": "2015.12.01 01:23:55",
+        "smart_money_activity": "15分钟内3名聪明钱交易",
+        "contract_security": json.dumps({
+            "authority": False,
+            "rug_pull": False,
+            "burn_pool": False,
+            "blacklist": True
+        }),
+        "top10_holding": 23.17,
+        "dev_holding_at_launch": 10.12,
+        "dev_holding_current": 23.12,
+        "dev_wallet_balance": 3.12,
+        "socials": json.dumps({
+            "twitter": False,
+            "website": True,
+            "telegram": True,
+            "twitter_search": True
+        })
     }
+    return data
 
-    async with aiohttp.ClientSession() as session:
-        # 從內部 API 獲取數據
-        internal_url = f"{INTERNAL_API_URL}/internal/token_info"
-        params = {
-            "network": "SOLANA",
-            "tokenAddress": token_address,
-            "brand": "BYD"
-        }
+async def push_to_channel(context: ContextTypes.DEFAULT_TYPE, message: str, crypto_id: Optional[int] = None, session=None, language: str = "zh") -> bool:
+    """推送消息到指定頻道或主題，带有重试机制"""
+    should_close_session = False
+    if session is None:
+        session = await models.get_session()
+        should_close_session = True
+
+    try:
+        # 檢查是否有主題設置
+        GROUP_RAW_ID = os.getenv("GROUP_ID")
+        TOPIC_ID = os.getenv("TOPIC_ID")
+        USE_TOPIC = GROUP_RAW_ID and TOPIC_ID
         
-        try:
-            async with session.get(internal_url, params=params) as internal_response:
-                if internal_response.status != 200:
-                    logger.error(f"內部 API 請求失敗: {internal_response.status}")
-                    return None
-                
-                internal_data = await internal_response.json()
-                
-                # 如果返回的數據中沒有 data 字段，表示代幣不存在
-                if internal_data.get("code") == 200 and not internal_data.get("data"):
-                    logger.info(f"代幣不存在: {token_address}")
-                    return None
-        except Exception as e:
-            logger.error(f"從內部 API 獲取數據時發生錯誤: {e}")
-            return None
-
-        # 從 Solscan API 獲取基本信息
-        url = f"https://pro-api.solscan.io/v2.0/token/meta?address={token_address}"
-        headers = {"token": SOLSCAN_API_TOKEN}
-
-        async with session.get(url, headers=headers) as response:
-            if response.status != 200:
-                logger.error(f"從 Solscan API 獲取數據失敗: {response.status}")
-                return None
-
-            solscan_data = await response.json()
-
-            if not solscan_data.get("success") or "data" not in solscan_data:
-                logger.error("Solscan API 返回無效數據")
-                return None
-
-            token_data = solscan_data["data"]
-            
-            # 檢查必要字段
-            if token_data.get("symbol") is None:
-                return None
-                
-            # 如果沒有 market_cap，嘗試計算
-            if token_data.get("market_cap") is None and token_data.get("price") is not None and token_data.get("supply") is not None:
-                try:
-                    price = float(token_data["price"])
-                    supply = float(token_data["supply"])
-                    token_data["market_cap"] = price * supply
-                except (ValueError, TypeError):
-                    logger.error("無法計算市值")
-                    return None
-
-            # 獲取社交媒體連結
-            has_twitter = False
-            has_website = False
-            twitter_url = None
-            website_url = None
-
-            # 從 metadata 中獲取社交媒體連結
-            if "metadata" in token_data and token_data["metadata"]:
-                metadata = token_data["metadata"]
-
-                if "twitter" in metadata and metadata["twitter"]:
-                    has_twitter = True
-                    twitter_url = metadata["twitter"]
-                    # 確保 Twitter URL 格式正確
-                    if not twitter_url.startswith(("http://", "https://")):
-                        twitter_url = f"https://{twitter_url}"
-
-                if "website" in metadata and metadata["website"]:
-                    has_website = True
-                    website_url = metadata["website"]
-                    # 確保 Website URL 格式正確
-                    if not website_url.startswith(("http://", "https://")):
-                        website_url = f"https://{website_url}"
-
-            # 獲取創建者錢包餘額
-            dev_wallet_balance = 0.0
-            if "creator" in token_data and token_data["creator"]:
-                creator_address = token_data["creator"]
-                try:
-                    dev_wallet_balance = await get_sol_balance(creator_address)
-                except Exception as e:
-                    logger.error(f"獲取創建者錢包餘額時出錯: {e}")
-
-            # 處理內部 API 數據
-            risk_items = {}
-            top10_holding = None
-            top10_holding_display = "--"
-            dev_status = None
-            dev_status_display = "--"
-            if internal_data and internal_data.get("code") == 200 and "data" in internal_data:
-                internal_token_data = internal_data["data"]
-                dev_status = internal_token_data.get("devStatus")
-
-                if dev_status is not None:
-                    dev_status_map = {
-                        0: "DEV持有",
-                        1: "DEV减仓",
-                        2: "DEV加仓",
-                        3: "DEV清仓",
-                        4: "DEV加池子",
-                        5: "DEV烧池子"
-                    }
-                    dev_status_display = dev_status_map.get(dev_status, "--")
-
-                # 優先從 baseTop10Percent 獲取 top10 持有比例
-                if "baseTop10Percent" in internal_token_data:
-                    try:
-                        top10_holding = float(internal_token_data.get("baseTop10Percent", 0))
-                        # 格式化為普通數字，避免科學計數法
-                        top10_holding_display = f"{top10_holding:.2f}"
-                    except (ValueError, TypeError):
-                        logger.warning(f"無法解析 baseTop10Percent: {internal_token_data.get('baseTop10Percent')}")
-
-                # 解析 riskItem JSON 字符串
-                try:
-                    # 初始化風險項目（默認都是不安全的）
-                    risk_items = {
-                        "authority": False,  # 權限檢查 - 默認不安全
-                        "rug_pull": False,   # 貔貅檢查 - 默認不安全
-                        "burn_pool": False,  # 資金池鎖定檢查 - 默認不安全
-                        "blacklist": False   # 黑名單檢查 - 默認不安全
-                    }
-
-                    # 項目代碼到風險類型的映射
-                    primary_code_map = {
-                        "PERMISSION_RENOUNCED": "authority",
-                        "NOT_PIKS": "rug_pull",
-                        "LP_LOCKED": "burn_pool",
-                        "NO_BLACKLIST": "blacklist"
-                    }
-
-                    # 解析風險項目列表
-                    risk_items_list = json.loads(internal_token_data.get("riskItem", "[]"))
-                    # logger.info(f"風險項目列表: {risk_items_list}")
-
-                    # 存在的項目代碼集合
-                    existing_codes = {item.get("code") for item in risk_items_list}
-
-                    # 如果上面沒獲取到 top10_holding，從風險項目列表中查找
-                    if top10_holding is None:
-                        for item in risk_items_list:
-                            if item.get("code") == "TOP_10_HOLDER_PERCENTAGE":
-                                try:
-                                    top10_holding = float(item.get("value", "0"))
-                                    # 格式化為普通數字，避免科學計數法
-                                    top10_holding_display = f"{top10_holding:.2f}"
-                                except (ValueError, TypeError):
-                                    top10_holding = None
-                                    top10_holding_display = "--"
-                                break
-
-                    # 首先處理主要的安全參數
-                    for item in risk_items_list:
-                        code = item.get("code")
-                        if code in primary_code_map:
-                            risk_type = primary_code_map[code]
-                            risk_items[risk_type] = item.get("riskStatus") == "PASS"
-                except json.JSONDecodeError as e:
-                    logger.error(f"解析 riskItem 時發生錯誤: {e}")
-
-            # 轉換時間戳為 UTC+8 格式
-            created_time = token_data.get("created_time")
-            if created_time:
-                dt = datetime.fromtimestamp(created_time, tz=timezone.utc)
-                dt_utc8 = dt.astimezone(timezone(timedelta(hours=8)))
-                formatted_time = dt_utc8.strftime("%Y.%m.%d %H:%M:%S")
-                launch_time = dt_utc8.replace(tzinfo=None)  # 數據庫存儲用
+        # 決定使用哪種模式
+        if USE_TOPIC:
+            # 添加 -100 前綴，除非已經有前綴
+            if GROUP_RAW_ID.startswith("-100"):
+                target_chat_id = GROUP_RAW_ID
             else:
-                formatted_time = "--"
-                launch_time = None
+                target_chat_id = f"-100{GROUP_RAW_ID}"
+            logger.info(f"使用主題模式，目標群組 ID: {target_chat_id}, 主題 ID: {TOPIC_ID}")
+        else:
+            target_chat_id = CHANNEL_ID
+            logger.info(f"使用頻道模式，目標頻道 ID: {target_chat_id}")
+        
+        if not target_chat_id:
+            logger.error("未設置頻道 ID 或群組 ID，無法推送消息")
+            return False
 
-            # 準備顯示和存儲的數據
-            market_cap = token_data.get("market_cap")
-            price = token_price
-            holders = token_data.get("holder")
+        # 從消息中提取 token_address
+        token_address = None
+        for line in message.split('\n'):
+            if '<code>' in line and '</code>' in line:
+                # 提取 <code> 標籤中的內容
+                start = line.find('<code>') + 6
+                end = line.find('</code>')
+                token_address = line[start:end].strip()
+                break
 
-            token_name = token_data.get("name", "Unknown")
-            token_symbol = token_data.get("symbol", "Unknown")
+        # 構建交易鏈接
+        trade_url = f"https://www.bydfi.com/en/moonx/solana/token?address={token_address}"
 
-            # 确保它们都不为空
-            if not token_name or token_name.strip() == "":
-                token_name = token_symbol  # 使用symbol作为备选
-            if not token_symbol or token_symbol.strip() == "":
-                token_symbol = token_name  # 使用name作为备选
+        # 根據語言獲取按鈕文本
+        templates = load_templates()
+        lang_templates = templates.get(language, templates.get("zh"))
+        trade_button_text = lang_templates.get("trade_button", "⚡️一键交易⬆️")
+        chart_button_text = lang_templates.get("chart_button", "👉查K线⬆️")
 
-            # 去除空格
-            token_name = token_name.strip()
-            token_symbol = token_symbol.strip()
+        keyboard = [
+            [
+                InlineKeyboardButton(trade_button_text, url=trade_url),
+                InlineKeyboardButton(chart_button_text, url=trade_url)
+            ]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
 
-            # 格式化數值顯示（避免科學計數法）
-            market_cap_display = "--"
-            price_display = "--"
-            holders_display = "--"
-            dev_wallet_balance_display = "0"
+        # 添加重試機制
+        max_retries = 3
+        retry_delay = 2
+        success = False
+        error_message = None
 
-            if market_cap is not None:
-                # 格式化市值显示，使用K、M、B表示
-                if market_cap >= 1_000_000_000:  # 十亿及以上用B
-                    market_cap_display = f"$ {market_cap / 1_000_000_000:.2f}B".rstrip('0').rstrip('.')
-                    if market_cap_display.endswith('.'):
-                        market_cap_display = market_cap_display[:-1]
-                elif market_cap >= 1_000_000:  # 百万及以上用M
-                    market_cap_display = f"$ {market_cap / 1_000_000:.2f}M".rstrip('0').rstrip('.')
-                    if market_cap_display.endswith('.'):
-                        market_cap_display = market_cap_display[:-1]
-                elif market_cap >= 10_000:  # 万及以上用K
-                    market_cap_display = f"$ {market_cap / 1_000:.2f}K".rstrip('0').rstrip('.')
-                    if market_cap_display.endswith('.'):
-                        market_cap_display = market_cap_display[:-1]
-                else:  # 小于一万直接显示
-                    market_cap_display = f"$ {market_cap:,.2f}".rstrip('0').rstrip('.')
-                    if market_cap_display.endswith('.'):
-                        market_cap_display = market_cap_display[:-1]
-
-            if price is not None:
-                # 处理非常小的数字，避免科学计数法
-                if price < 0.0001:
-                    # 查找第一个非零位
-                    str_price = str(price)
-                    decimal_places = 8
-
-                    # 对于非常小的数字，寻找第一个非零数字
-                    if "e-" in str_price:  # 科学计数法
-                        # 提取指数
-                        exponent = int(str_price.split("e-")[1])
-                        # 设置足够的小数位
-                        decimal_places = exponent + 2  # 多显示一两位有效数字
-
-                    price_display = f"{price:.{decimal_places}f}".rstrip('0').rstrip('.')
-                    if price_display == "":
-                        price_display = "0"
-                else:
-                    # 一般数字，显示足够的小数位
-                    price_display = f"{price:.6f}".rstrip('0').rstrip('.')
-                    if price_display == "":
-                        price_display = "0"
-
-            if holders is not None:
-                # 持幣人數為整數，使用千分位格式
-                holders_display = f"{holders:,}"
-
-            if dev_wallet_balance:
-                # 開發者錢包餘額，特殊格式化小數點後多個零的情況
-                str_balance = str(dev_wallet_balance)
-                if '.' in str_balance:
-                    integer_part, decimal_part = str_balance.split('.')
-                    
-                    # 计算小数点后连续的零的个数
-                    zero_count = 0
-                    for char in decimal_part:
-                        if char == '0':
-                            zero_count += 1
-                        else:
-                            break
-                    
-                    # 如果小数点后有超过3个连续的零
-                    if zero_count > 3:
-                        # 找到第一个非零数字的位置
-                        non_zero_pos = decimal_part.find(next(filter(lambda x: x != '0', decimal_part), ''))
-                        if non_zero_pos != -1:
-                            # 格式化为 "整数.0{零的数量}非零部分"
-                            dev_wallet_balance_display = f"{integer_part}.0{{{zero_count}}}{decimal_part[zero_count:]}"
-                        else:
-                            # 如果小数部分全是零
-                            dev_wallet_balance_display = f"{integer_part}.0"
-                    else:
-                        # 如果零的数量不多，正常显示两位小数
-                        dev_wallet_balance_display = f"{dev_wallet_balance:.2f}"
-                else:
-                    # 如果没有小数部分
-                    dev_wallet_balance_display = f"{dev_wallet_balance:.2f}"
-
-            # 構建社交媒體信息 JSON
-            socials_json = {
-                "twitter": has_twitter,
-                "website": has_website,
-                "telegram": False,  # 默認沒有 Telegram
-                "twitter_search": True,  # 總是可以搜索 Twitter
-                "twitter_url": twitter_url,
-                "website_url": website_url
-            }
-
-            # 更新 crypto_data 字典
-            crypto_data.update({
-                "token_name": token_name,
-                "token_symbol": token_symbol,
-                "price": price if price is not None else None,
-                "holders": holders if holders is not None else None,
-                "launch_time": launch_time,
-                "top10_holding": top10_holding,
-                "dev_status": dev_status,
-                "dev_status_display": dev_status_display,
-                "market_cap_display": market_cap_display,
-                "price_display": price_display,
-                "holders_display": holders_display,
-                "launch_time_display": formatted_time,
-                "top10_holding_display": top10_holding_display,
-                "dev_wallet_balance_display": dev_wallet_balance_display,
-                "contract_security": json.dumps({
-                    "authority": risk_items.get("authority", False),
-                    "rug_pull": risk_items.get("rug_pull", False),
-                    "burn_pool": risk_items.get("burn_pool", False),
-                    "blacklist": risk_items.get("blacklist", False)
-                }),
-                "socials": json.dumps(socials_json)
-            })
-
-            # ------------------------------------------------聰明錢動態------------------------------------------------
+        for attempt in range(max_retries):
             try:
-                buy_list = []
-                async with aiohttp.ClientSession() as smart_money_session:
-                    url = f"http://{SMART_MONEY}:5041/robots/smartmoney/tokentrend"
-                    payload = {
-                        "chain": "SOLANA",
-                        "token_addresses": [token_address],
-                        "time": 3600  # 1小時
-                    }
+                # 使用 Bot 類直接創建實例
+                bot = Bot(token=BOT_TOKEN)
 
-                    async with smart_money_session.post(url, json=payload) as response:
-                        if response.status == 200:
-                            smart_money_data = await response.json()
-                            if smart_money_data.get("code") == 200 and smart_money_data.get("data"):
-                                token_data = smart_money_data["data"][0]
-                                buy_list = token_data.get("buy", [])
-                                total_addr_amount = str(token_data.get("total_addr_amount", 0))
-                                crypto_data["total_addr_amount"] = total_addr_amount
-                                logger.info(f"获取到智能钱数据: {total_addr_amount}名聪明钱")
-
-                kol_wallets, smart_wallets, high_value_smart_wallets, smart_wallets_win_rate = await get_cached_wallets()
+                # 準備發送參數
+                message_params = {
+                    'chat_id': target_chat_id,
+                    'text': message,
+                    'reply_markup': reply_markup,
+                    'parse_mode': 'HTML'
+                }
                 
-                # 1. KOL地址买入
-                if any(buy['wallet_address'] in kol_wallets for buy in buy_list):
-                    crypto_data["highlight_tag_codes"].append(1)
-                    logger.info("觸發KOL地址买入標籤")
+                # 如果使用主題模式，添加主題 ID
+                if USE_TOPIC:
+                    message_params['message_thread_id'] = int(TOPIC_ID)
+                
+                # 發送消息
+                await bot.send_message(**message_params)
 
-                # 2. 1小时内吸引≥3个高净值聪明钱地址买入
-                high_value_buyers = set(
-                    buy['wallet_address'] for buy in buy_list if buy['wallet_address'] in high_value_smart_wallets
-                )
-                if len(high_value_buyers) >= 3:
-                    crypto_data["highlight_tag_codes"].append(2)
-                    logger.info("觸發高净值聪明钱地址买入標籤")
+                log_message = f"消息已發送到{'主題 ' + TOPIC_ID + ' 在群組 ' + target_chat_id if USE_TOPIC else '頻道 ' + target_chat_id}"
+                logger.info(log_message)
+                success = True
+                break  # 成功發送，跳出重試循環
 
-                # 3. 同一聪明钱购买超过1万美金
-                from collections import defaultdict
-                usd_sum = defaultdict(float)
-                for buy in buy_list:
-                    addr = buy['wallet_address']
-                    if addr in smart_wallets:
-                        usd_sum[addr] += float(buy.get('wallet_buy_usd', 0))
-                if any(total > 10000 for total in usd_sum.values()):
-                    crypto_data["highlight_tag_codes"].append(3)
-                    logger.info("觸發同一聪明钱购买超过1万美金標籤")
+            except (NetworkError, TimedOut) as e:
+                # 網絡錯誤，等待一段時間後重試
+                error_message = f"網絡錯誤: {str(e)}"
+                logger.warning(f"第 {attempt+1} 次嘗試發送消息失敗: {error_message}，等待 {retry_delay} 秒後重試")
+                await asyncio.sleep(retry_delay)
+                retry_delay *= 2  # 指數退避策略
 
-                logger.info(f"最終的亮點標籤代碼: {crypto_data['highlight_tag_codes']}")
+            except RetryAfter as e:
+                # API 限流，等待指定的時間後重試
+                retry_after = e.retry_after
+                error_message = f"API 限流，需要等待 {retry_after} 秒"
+                logger.warning(f"第 {attempt+1} 次嘗試發送消息失敗: {error_message}")
+                await asyncio.sleep(retry_after)
 
             except Exception as e:
-                logger.error(f"获取智能钱活动时出错: {e}")
-                crypto_data["highlight_tag_codes"] = []
+                # 其他錯誤
+                error_message = str(e)
+                target_desc = f"{'主題 ' + TOPIC_ID + ' 在群組 ' + target_chat_id if USE_TOPIC else '頻道 ' + target_chat_id}"
+                logger.error(f"無法發送消息到{target_desc}: {error_message}")
+                break  # 非預期錯誤，不重試
 
-            return crypto_data
-
-@app.route('/api/tg_push', methods=['POST'])
-async def tg_push():
-    """接收代幣地址並異步觸發推送"""
-    try:
-        # 獲取請求數據
-        data = await request.get_json()
-        token_address = data.get('token_address')
-        chain = data.get('chain')
-
-        if not token_address:
-            return jsonify({
-                'status': 'error',
-                'message': 'Missing required parameter: token_address'
-            }), 400
-
-        if not chain:
-            return jsonify({
-                'status': 'error',
-                'message': 'Missing required parameter: chain'
-            }), 400
-
-        # 驗證 chain 參數
-        ALLOWED_CHAINS = ['SOLANA', 'BASE', 'ETH', 'BSC', 'TRON']
-        if chain not in ALLOWED_CHAINS:
-            return jsonify({
-                'status': 'error',
-                'message': f'Invalid chain parameter. Must be one of: {", ".join(ALLOWED_CHAINS)}'
-            }), 400
-
-        # 檢查是否正在處理
-        is_processing = False
-        async with processing_lock:
-            is_processing = token_address in processed_tokens
-
-        if is_processing:
-            logger.info(f"代幣已在處理中: {token_address}")
-            return jsonify({
-                'status': 'success',
-                'message': 'Token is already being processed'
-            })
-
-        # 將任務添加到隊列
-        logger.info(f"將代幣添加到處理隊列: chain={chain}, address={token_address}")
-        with queue_lock:
-            token_queue.append({
-                'token_address': token_address,
-                'chain': chain
-            })
-
-        # 立即返回成功响應
-        return jsonify({
-            'status': 'success',
-            'message': 'Token notification request accepted and queued for processing'
-        })
-
+        # 記錄推送歷史
+        chat_id_for_history = f"{target_chat_id}_{TOPIC_ID}" if USE_TOPIC else target_chat_id
+        await models.add_push_history(
+            session,
+            message_content=message,
+            chat_ids=json.dumps([chat_id_for_history]),
+            crypto_id=crypto_id,
+            status="success" if success else "failed",
+            error_message=error_message
+        )
+        await session.commit()
+        return success
     except Exception as e:
-        logger.error(f"API 請求處理錯誤: {e}")
-        return jsonify({
-            'status': 'error',
-            'message': str(e)
-        }), 500
-
-# 修改批量添加代幣API
-@app.route('/api/tg_push_premium', methods=['POST'])
-async def tg_push_premium():
-    try:
-        data = await request.get_json()
-        
-        # 驗證必要字段
-        required_fields = ['token_address', 'chain', 'market_cap_level', 'open_time', 'token_price']
-        for field in required_fields:
-            if field not in data:
-                return jsonify({"error": f"缺少必要字段: {field}"}), 400
-
-        # 將任務添加到隊列
-        with queue_lock:
-            token_queue.append({
-                'type': 'premium',
-                'data': data
-            })
-
-        # 立即返回成功響應
-        return jsonify({
-            'status': 'success',
-            'message': '推送任務已加入隊列'
-        })
-
-    except Exception as e:
-        logger.error(f"處理請求時發生錯誤: {e}")
-        return jsonify({"error": str(e)}), 500
-
-# 獲取處理隊列狀態
-@app.route('/api/queue_status', methods=['GET'])
-async def queue_status():
-    """獲取代幣處理隊列狀態"""
-    try:
-        with queue_lock:
-            queue_size = len(token_queue)
-
-        async with processing_lock:
-            processed_count = len(processed_tokens)
-
-        return jsonify({
-            'status': 'success',
-            'data': {
-                'queue_size': queue_size,
-                'processed_tokens': processed_count
-            }
-        })
-    except Exception as e:
-        logger.error(f"獲取隊列狀態錯誤: {e}")
-        return jsonify({
-            'status': 'error',
-            'message': str(e)
-        }), 500
-
-async def get_sol_balance(wallet_address: str) -> float:
-    """
-    獲取 SOL 餘額
-    :param wallet_address: 錢包地址
-    :return: SOL 餘額 (浮點數)
-    """
-    # 創建 RPC 客戶端
-    client = None
-    try:
-        # 首先嘗試主要 RPC
-        client = AsyncClient(RPC_URL)
-        pubkey = Pubkey(base58.b58decode(wallet_address))
-        balance_response = await client.get_balance(pubkey=pubkey)
-
-        # 從回應中獲取值
-        # solders.rpc.responses.GetBalanceResp 格式有所不同
-        sol_balance = float(balance_response.value) / 10**9
-        logger.info(f"錢包 {wallet_address} 的 SOL 餘額: {sol_balance}")
-        return sol_balance
-    except Exception as e:
-        logger.error(f"使用主要 RPC 獲取 SOL 餘額時發生異常: {e}")
-        try:
-            # 嘗試使用備用 RPC
-            if client:
-                await client.close()
-            client = AsyncClient(RPC_URL_BACKUP)
-            pubkey = Pubkey(base58.b58decode(wallet_address))
-            balance_response = await client.get_balance(pubkey=pubkey)
-
-            # 從回應中獲取值
-            sol_balance = float(balance_response.value) / 10**9
-            logger.info(f"使用備用 RPC 獲取錢包 {wallet_address} 的 SOL 餘額: {sol_balance}")
-            return sol_balance
-        except Exception as e:
-            logger.error(f"使用備用 RPC 獲取 SOL 餘額時也發生異常: {e}")
-            return 0.0
+        logger.error(f"推送過程中發生錯誤: {e}")
+        await session.rollback()
+        return False
     finally:
-        # 確保客戶端連接關閉
-        if client:
+        if should_close_session:
+            await session.close()
+
+async def push_to_all_language_channels(context: ContextTypes.DEFAULT_TYPE, crypto_data: Dict, session=None, is_low_frequency: bool = False) -> Dict[str, bool]:
+    """同時向所有語言主題推送加密貨幣資訊，支持高频和低频信号"""
+    results = {}
+    
+    # 從環境變數加載語言群組配置
+    language_groups = json.loads(os.getenv("LANGUAGE_GROUPS", "{}"))
+    
+    if not language_groups:
+        message = format_message(crypto_data)
+        result = await push_to_channel(context, message, crypto_data.get("id"), session, language="zh")
+        return {"default": result}
+    
+    should_close_session = False
+    if session is None:
+        session = await models.get_session()
+        should_close_session = True
+    
+    try:
+        original_group_id = os.getenv("GROUP_ID")
+        original_topic_id = os.getenv("TOPIC_ID")
+        
+        for language, target in language_groups.items():
             try:
-                await client.close()
-            except Exception:
-                pass
+                if is_low_frequency:
+                    group_id = target.get("low_freq_group_id") or target.get("group_id")
+                    topic_id = target.get("low_freq_topic_id") or target.get("topic_id")
+                else:
+                    group_id = target.get("high_freq_group_id") or target.get("group_id")
+                    topic_id = target.get("high_freq_topic_id") or target.get("topic_id")
+                
+                if group_id:
+                    os.environ["GROUP_ID"] = group_id
+                if topic_id:
+                    os.environ["TOPIC_ID"] = topic_id
+                
+                if is_low_frequency:
+                    from templates import format_premium_message
+                    message = format_premium_message(crypto_data, language)
+                else:
+                    from templates import format_message
+                    message = format_message(crypto_data, language)
+                
+                success = await push_to_channel(
+                    context, 
+                    message, 
+                    crypto_data.get("id"), 
+                    session,
+                    language=language
+                )
+                
+                results[language] = success
+                logger.info(f"向 {language} 主題推送{'低频' if is_low_frequency else '高频'}信號: {'成功' if success else '失敗'}")
+                
+            except Exception as e:
+                logger.error(f"向 {language} 主題推送{'低频' if is_low_frequency else '高频'}信號時發生錯誤: {e}")
+                results[language] = False
+        
+        # 恢復原始環境變數
+        if original_group_id:
+            os.environ["GROUP_ID"] = original_group_id
+        else:
+            if "GROUP_ID" in os.environ:
+                del os.environ["GROUP_ID"]
+        
+        if original_topic_id:
+            os.environ["TOPIC_ID"] = original_topic_id
+        else:
+            if "TOPIC_ID" in os.environ:
+                del os.environ["TOPIC_ID"]
+            
+        await session.commit()
+        
+        # 日誌輸出總結
+        success_count = sum(1 for success in results.values() if success)
+        total_count = len(results)
+        logger.info(f"多語言推送完成: 成功 {success_count}/{total_count}")
+        
+        return results
+    except Exception as e:
+        logger.error(f"多語言推送過程中發生錯誤: {e}")
+        await session.rollback()
+        return {"error": str(e)}
+    finally:
+        if should_close_session:
+            await session.close()
 
-async def run_api():
-    """運行 Quart API"""
-    config = {
-        "host": LOCAL,
-        # "host": "127.0.0.1",
-        "port": 5011,
-        "debug": False  # 在生產環境中禁用 debug 模式
-    }
-    await app.run_task(**config)
+# Bot 命令處理函數
+async def push(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """手動觸發推送加密貨幣信息到所有語言主題的命令"""
+    await update.message.reply_text("正在獲取加密貨幣數據並推送到所有語言主題...")
 
-if __name__ == '__main__':
-    # 設置事件循環策略
-    if os.name == 'nt':  # Windows
-        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+    try:
+        # 獲取加密貨幣數據
+        data = fetch_crypto_data()
 
-    # 運行 API
-    asyncio.run(run_api())
+        # 創建會話
+        session = await models.get_session()
+        try:
+            # 儲存加密貨幣資訊
+            crypto_id = await models.add_crypto_info(session, data)
+            if crypto_id is None:
+                await update.message.reply_text("❌ 無法儲存加密貨幣資訊，推送中止。")
+                return
 
-# 在 api.py 的開頭添加
-HIGHLIGHT_TAG_CODES = {
-    1: "KOL地址买入",
-    2: "1小时内吸引≥3个高净值聪明钱地址买入",
-    3: "同一聪明钱购买超过1万美金"
-}
+            # 設置 ID 用於多語言推送
+            data["id"] = crypto_id
+
+            # 推送到所有語言主題
+            results = await push_to_all_language_channels(context, data, session)
+
+            # 檢查結果
+            if "error" in results:
+                await update.message.reply_text(f"❌ 推送過程中發生錯誤: {results['error']}")
+            else:
+                success_count = sum(1 for success in results.values() if success)
+                total_count = len(results)
+                if success_count == total_count:
+                    await update.message.reply_text(f"✅ 成功推送到所有 {total_count} 個語言主題！")
+                else:
+                    await update.message.reply_text(f"⚠️ 部分推送失敗: 成功 {success_count}/{total_count} 個語言主題。請檢查日誌。")
+
+        except Exception as e:
+            logger.error(f"數據庫操作錯誤: {e}")
+            await session.rollback()
+            await update.message.reply_text(f"❌ 推送失敗: {str(e)}")
+        finally:
+            await session.close()
+    except Exception as e:
+        logger.error(f"推送命令處理錯誤: {e}")
+        await update.message.reply_text(f"❌ 推送失敗: {str(e)}")
+
+async def test_multilang(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """測試多語言推送"""
+    await update.message.reply_text("正在測試多語言推送...")
+
+    try:
+        # 使用測試數據
+        data = fetch_crypto_data()
+        
+        # 創建會話
+        session = await models.get_session()
+        try:
+            # 儲存測試數據
+            crypto_id = await models.add_crypto_info(session, data)
+            if crypto_id is None:
+                await update.message.reply_text("❌ 無法儲存測試數據，測試中止。")
+                return
+            
+            # 設置 ID
+            data["id"] = crypto_id
+            
+            # 推送到所有語言主題
+            results = await push_to_all_language_channels(context, data, session)
+            
+            # 報告結果
+            success_languages = [lang for lang, success in results.items() if success]
+            failed_languages = [lang for lang, success in results.items() if not success]
+            
+            if failed_languages:
+                await update.message.reply_text(
+                    f"⚠️ 多語言推送測試結果:\n"
+                    f"✅ 成功語言: {', '.join(success_languages)}\n"
+                    f"❌ 失敗語言: {', '.join(failed_languages)}"
+                )
+            else:
+                await update.message.reply_text(
+                    f"✅ 多語言推送測試成功! 已推送到這些語言: {', '.join(success_languages)}"
+                )
+                
+        except Exception as e:
+            logger.error(f"測試多語言推送時發生錯誤: {e}")
+            await session.rollback()
+            await update.message.reply_text(f"❌ 測試失敗: {str(e)}")
+        finally:
+            await session.close()
+    except Exception as e:
+        logger.error(f"測試命令處理錯誤: {e}")
+        await update.message.reply_text(f"❌ 測試失敗: {str(e)}")
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """處理 /start 命令"""
+    await update.message.reply_text(
+        "👋 歡迎使用 MOONX 加密貨幣資訊機器人！\n\n"
+        "🔹 使用 /push 命令可以推送最新的加密貨幣資訊到公告頻道\n\n"
+        "有任何問題或建議，請聯繫管理員。"
+    )
+
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """處理 /help 命令"""
+    await update.message.reply_text(
+        "📚 MOONX 機器人指令說明：\n\n"
+        "/start - 查看歡迎訊息\n"
+        "/help - 顯示此幫助訊息\n"
+        "/push - 推送最新加密貨幣資訊到公告頻道\n\n"
+        "⚠️ 注意：推送功能僅限授權用戶使用。"
+    )
+
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """處理所有 Telegram 錯誤"""
+    error = context.error
+
+    try:
+        # 獲取錯誤的追溯信息
+        tb_list = traceback.format_exception(None, error, error.__traceback__)
+        tb_string = ''.join(tb_list)
+
+        # 記錄錯誤信息
+        logger.error(f"發生異常: {error}")
+        logger.error(f"完整的追溯信息:\n{tb_string}")
+
+        # 如果 update 存在，通知用戶
+        if isinstance(update, Update) and update.effective_message:
+            await update.effective_message.reply_text("抱歉，處理您的請求時發生錯誤。")
+    except Exception as e:
+        logger.error(f"處理錯誤時發生異常: {e}")
+
+async def main():
+    """主函數"""
+    try:
+        # 初始化 bot
+        global bot_app
+        bot_app = init_bot()
+
+        # 啟動 Bot
+        logger.info("Bot 開始初始化...")
+        await bot_app.initialize()
+        logger.info("Bot 初始化完成，正在啟動...")
+        await bot_app.start()
+        logger.info("Bot 啟動完成，開始輪詢...")
+
+        # 啟動輪詢並保持運行，設置更穩健的參數
+        polling_options = {
+            'drop_pending_updates': True,
+            'allowed_updates': ['message', 'callback_query']
+        }
+
+        # 啟動輪詢
+        await bot_app.updater.start_polling(**polling_options)
+        logger.info("Bot 輪詢已啟動")
+
+        # 使用事件等待機制來保持運行
+        stop_event = asyncio.Event()
+
+        # 等待直到收到停止信號
+        await stop_event.wait()
+
+    except Exception as e:
+        logger.error(f"Bot 運行時發生錯誤: {e}")
+        logger.error(traceback.format_exc())
+    finally:
+        logger.info("正在停止 Bot...")
+        try:
+            if bot_app and hasattr(bot_app.updater, 'running') and bot_app.updater.running:
+                logger.info("正在停止輪詢...")
+                await bot_app.updater.stop()
+
+            if bot_app:
+                logger.info("正在停止 bot...")
+                await bot_app.stop()
+                logger.info("正在關閉 bot...")
+                await bot_app.shutdown()
+                logger.info("Bot 已完全停止")
+        except Exception as e:
+            logger.error(f"停止 Bot 時發生錯誤: {e}")
+            logger.error(traceback.format_exc())
+
+if __name__ == "__main__":
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        logger.info("收到停止信號，Bot 正在停止...")
