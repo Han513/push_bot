@@ -238,7 +238,7 @@ def load_templates():
             "top10_holding": "• Anteil der Top-10-Halter: {0}%",
             "social_info": "Zugehörige Links:",
             "social_links": "🔗 Twitter-Influencer: {0} || Offizielle Website: {1} || Telegram: {2} || Suche auf X: {3}",
-            "community_tips": "⚠️ Risikowarnung:\n• Kryptowährungsinvestitionen sind extrem riskant. Führen Sie immer Ihre eigene Recherche durch (DYOR)\n• Vermeiden Sie FOMO (Fear of Missing Out) – Investieren Sie rational\n• Seien Sie vorsichtig bei Rug Pulls und anderen Betrugsmethoden\nMoonX Community Erinnerung:\n• Bleiben Sie auf dem Laufenden mit Community-Ankündigungen für die neuesten Updates\n• Teilen Sie gerne Ihre Erkenntnisse und Analysen in der Gruppe",
+            "community_tips": "⚠️ Risikowarnung:\n• Kryptowährungsinvestitionen sind extrem riskant. Führen Sie stets eigene Recherchen durch (DYOR).\n• Vermeiden Sie FOMO (Fear of Missing Out) – Investieren Sie rational\n• Seien Sie vorsichtig bei Rug Pulls und anderen Betrugsmethoden.\nMoonX Community Erinnerung:\n• Bleiben Sie auf dem Laufenden mit Community-Ankündigungen für die neuesten Updates\n• Teilen Sie gerne Ihre Erkenntnisse und Analysen in der Gruppe.",
             "trade_button": "⚡️Schnellhandel⬆️",
             "chart_button": "👉Chart Prüfen⬆️"
         },
@@ -260,7 +260,7 @@ def load_templates():
             "top10_holding": "• Quota Top 10 Detentori: {0}%",
             "social_info": "Collegamenti:",
             "social_links": "🔗 Influencer Twitter: {0} || Sito Ufficiale: {1} || Telegram: {2} || Cerca su X: {3}",
-            "community_tips": "⚠️ Avviso di Rischio:\n• Gli investimenti in criptovalute sono estremamente rischiosi. Fai sempre le tue ricerche (DYOR)\n• Evita il FOMO (Fear of Missing Out) - Investi razionalmente\n• Attenzione ai Rug Pull e altre tattiche di truffa\nPromemoria della Comunità MoonX:\n• Segui gli annunci della comunità per gli ultimi aggiornamenti\n• Condividi liberamente le tue analisi e idee nel gruppo",
+            "community_tips": "⚠️ Avviso di Rischio:\n• Gli investimenti in criptovalute sono estremamente rischiosi. Fai sempre le tue ricerche (DYOR)\n• Evita il FOMO (Fear of Missing Out) - Investi razionalmente\n• Attenzione ai Rug Pull e ad altre tattiche di truffa\nPromemoria della Comunità MoonX:\n• Segui gli annunci della comunità per gli ultimi aggiornamenti\n• Condividi liberamente le tue analisi e idee nel gruppo",
             "trade_button": "⚡️Trading Rapido⬆️",
             "chart_button": "👉Controlla Grafico⬆️"
         },
@@ -269,22 +269,20 @@ def load_templates():
             "token_info": "├ ${0} ({1}) – {2}",
             "market_cap": "💊 القيمة السوقية الحالية: {0}",
             "price": "💰 السعر الحالي: {0}",
-            "holders": "👬 المالكين: {0}",
-            "launch_time": "⏳ وقت الإطلاق: [{0}]",
+            "holders": "👬 حاملو السندات: {0}",
+            "launch_time": "⏳ وقت البدء: [{0}]",
             "divider": "——————————————————",
-            "chain_monitoring": "🔍 مراقبة السلسلة",
-            "smart_money": "🤏 اتجاه الأموال الذكية: {0} معاملة ذكية في آخر 15 دقيقة",
-            "contract_security": "المراجعة:",
-            "security_item": "• الصلاحيات: [{0}] مصيدة العسل: [{1}] حوض الحرق: [{2}] القائمة السوداء: [{3}]",
+            "chain_monitoring": "🔍 مراقبة البلوكتشين",
+            "smart_money": "🤏 اتجاه المال الذكي: {0} تداولات أموال ذكية في آخر 15 دقيقة",
+            "contract_security": ":التدقيق",
+            "security_item": "• الأذونات: [{0}] نقطة التداوُل: [{1}] مجموعة الحرق: [{2}] قائمة الحرق: [{3}]",
             "dev_info": "معلومات المطور:",
-            "dev_status": "• الحيازة الأولية: {0}",
-            "dev_balance": "• رصيد محفظة المطور: {0} SOL",
-            "top10_holding": "• حصة أكبر 10 مالكين: {0}%",
-            "social_info": "روابط ذات صلة:",
-            "social_links": "🔗 مؤثر تويتر: {0} | | الموقع الرسمي: {1} | | | تيليجرام {2} | | بحث X: {3}",
-            "community_tips": "⚠️ تحذير المخاطر:\n -و الاستثمارات في العملات الرقمية محفوفة بالمخاطر. DYOR (قم دائمًا بالبحث بنفسك)\n • تجنب FOMO (الخوف من فقدان الفرصة) - استثمر بعقلانية\n • احترس من العمليات الاحتيالية مثل \" عملية السحب على البساط (Rug Pulls)\" وأساليب الاحتيال الأخرى\nتذكير من مجتمع MoonX:\n • ترقبوا إعلانات المجتمع للاطلاع على آخر التحديثات\n • لا تتردد في مشاركة أفكارك وتحليلاتك في المجموعة",
-            "trade_button": "⚡️تداول سريع⬆️",
-            "chart_button": "👉تحقق من الرسم البياني⬆️"
+            "dev_status": "• الحيازة الأولية {0}",
+            "dev_balance": "• رصيد محفظة المطور: {0} سول",
+            "top10_holding": "• أفضل 10 حائزين على أعلى 10 حصص {0}%",
+            "social_info": "🔗 ذات صلة",
+            "social_links": "مؤثر تويتر: {0} | | الموقع الرسمي: {1} | | | تيليجرام {2} | | بحث X: {3}",
+            "community_tips": "⚠️ تحذير من المخاطر:\n -و الاستثمارات في العملات الرقمية محفوفة بالمخاطر. DYOR (قم دائمًا بالبحث بنفسك)\n • تجنب FOMO (الخوف من فقدان الفرصة) - استثمر بعقلانية\n • احترس من العمليات الاحتيالية مثل \" عملية السحب على البساط (Rug Pulls)\" وأساليب الاحتيال الأخرى\nتذكير من مجتمع MoonX:\n • ترقبوا إعلانات المجتمع للاطلاع على آخر التحديثات\n • لا تتردد في مشاركة أفكارك وتحليلاتك في المجموعة"
         },
         "fa": {
             "title": "🟢 [MoonX] 🟢 لیست جدید / هشدار بازار 🪙",
@@ -297,10 +295,10 @@ def load_templates():
             "chain_monitoring": "🔍 نظارت زنجیره‌ای",
             "smart_money": "🤏 روند پول هوشمند: {0} معامله پول هوشمند در 15 دقیقه گذشته",
             "contract_security": "بازرسی:",
-            "security_item": "• مجوزها: [{0}] هانی‌پات: [{1}] استخر سوزاندن: [{2}] لیست سیاه: [{3}]",
+            "security_item": "• مجوزها: [{0}] هانی‌پات: [{1}] استخر سوختگی: [{2}] لیست سیاه: [{3}]",
             "dev_info": "اطلاعات توسعه‌دهنده:",
             "dev_status": "• مالکیت اولیه: {0}",
-            "dev_balance": "• موجودی کیف پول توسعه‌دهنده: {0} SOL",
+            "dev_balance": "• موجودی کیف پول توسعه دهنده: {0} SOL",
             "top10_holding": "• سهم 10 دارنده برتر: {0}%",
             "social_info": "لینک‌های مرتبط:",
             "social_links": "🔗 اینفلوئنسر توییتر: {0} || وب‌سایت رسمی: {1} || تلگرام: {2} || جستجو در X: {3}",
@@ -753,34 +751,34 @@ def format_message(data: Dict, language: str = "zh") -> str:
             "top10_holding": "• Anteil der Top-10-Halter: {0}%",
             "social_info": "Zugehörige Links:",
             "social_links": "🔗 Twitter-Influencer: {0} || Offizielle Website: {1} || Telegram: {2} || Suche auf X: {3}",
-            "community_tips": "⚠️ Risikohinweis:\n• Kryptowährungsinvestitionen sind extrem riskant. Führen Sie stets eigene Recherchen durch (DYOR).\n• Vermeiden Sie FOMO (Fear of Missing Out) – Investieren Sie rational.\n• Achten Sie auf Rug Pulls und andere Betrugsmethoden.\nHinweis der MoonX-Community:\n• Bleiben Sie über Community-Ankündigungen auf dem Laufenden.\n• Teilen Sie gerne Ihre Erkenntnisse und Analysen in der Gruppe.",
+            "community_tips": "⚠️ Risikowarnung:\n• Kryptowährungsinvestitionen sind extrem riskant. Führen Sie stets eigene Recherchen durch (DYOR).\n• Vermeiden Sie FOMO (Fear of Missing Out) – Investieren Sie rational\n• Seien Sie vorsichtig bei Rug Pulls und anderen Betrugsmethoden.\nMoonX Community Erinnerung:\n• Bleiben Sie auf dem Laufenden mit Community-Ankündigungen für die neuesten Updates\n• Teilen Sie gerne Ihre Erkenntnisse und Analysen in der Gruppe.",
             "trade_button": "⚡️Schnellhandel⬆️",
             "chart_button": "👉Chart Prüfen⬆️"
         },
         "it": {
             "title": "🟢 [MoonX] 🟢 Nuove Inserzioni / Avviso di Mercato 🪙:",
             "token_info": "├ ${0} ({1}) – {2}",
-            "market_cap": "💊 Cap di Mercato Attuale: {0}",
+            "market_cap": "💊 Capitalizzazione di Mercato Attuale: {0}",
             "price": "💰 Prezzo Attuale: {0}",
             "holders": "👬 Detentori: {0}",
-            "launch_time": "⏳ Ora di Inizio: [{0}]",
+            "launch_time": "⏳ Orario di Lancio: [{0}]",
             "divider": "——————————————————",
             "chain_monitoring": "🔍 Monitoraggio On-chain",
-            "smart_money": "🤏 Trend Smart Money: {0} azioni di trading di Smart Money negli ultimi 15 minuti",
-            "contract_security": "Controllo:",
-            "security_item": "• Permessi: [{0}] Honeypot: [{1}] Pool di Burn: [{2}] Blacklist: [{3}]",
-            "dev_info": "Informazioni sullo Sviluppatore:",
-            "dev_status": "• Detenzione Iniziale: {0}",
-            "dev_balance": "• Saldo del Wallet dello Sviluppatore: {0} SOL",
-            "top10_holding": "• Quota dei Primi 10 Detentori: {0}%",
-            "social_info": "Correlato:",
-            "social_links": "🔗 Influencer su Twitter: {0} || Sito Ufficiale: {1} || Telegram: {2} || Cerca X: {3}",
-            "community_tips": "⚠️ Avviso di Rischio:\n• Gli investimenti in criptovalute sono estremamente rischiosi. Fai sempre le tue ricerche (DYOR)\n• Evita il FOMO (Paura di Perdere un'Opportunità) – Investi in modo razionale\n• Fai attenzione ai Rug Pulls e ad altre tattiche fraudolente\nPromemoria della Comunità MoonX:\n• Resta aggiornato sugli annunci della comunità per le ultime novità\n• Sentiti libero di condividere le tue intuizioni e analisi nel gruppo",
+            "smart_money": "🤏 Trend Smart Money: {0} transazioni smart money negli ultimi 15 minuti",
+            "contract_security": "Verifica:",
+            "security_item": "• Permessi: [{0}] Honeypot: [{1}] Burn Pool: [{2}] Lista Nera: [{3}]",
+            "dev_info": "Informazioni Sviluppatore:",
+            "dev_status": "• Possesso Iniziale: {0}",
+            "dev_balance": "• Saldo Wallet Sviluppatore: {0} SOL",
+            "top10_holding": "• Quota Top 10 Detentori: {0}%",
+            "social_info": "Collegamenti:",
+            "social_links": "🔗 Influencer Twitter: {0} || Sito Ufficiale: {1} || Telegram: {2} || Cerca su X: {3}",
+            "community_tips": "⚠️ Avviso di Rischio:\n• Gli investimenti in criptovalute sono estremamente rischiosi. Fai sempre le tue ricerche (DYOR)\n• Evita il FOMO (Fear of Missing Out) - Investi razionalmente\n• Attenzione ai Rug Pull e ad altre tattiche fraudolente\nPromemoria della Comunità MoonX:\n• Segui gli annunci della comunità per gli ultimi aggiornamenti\n• Condividi liberamente le tue analisi e idee nel gruppo",
             "trade_button": "⚡️Trading Rapido⬆️",
             "chart_button": "👉Controlla Grafico⬆️"
         },
         "ar": {
-            "title": "🟢 [MoonX] 🟢 قائمة جديدة / تنبيه السوق 🟢:",
+            "title": "🟢 [MoonX] 🟢 إدراج جديد / تنبيه السوق 🟢:",
             "token_info": "├ ${0} ({1}) – {2}",
             "market_cap": "💊 القيمة السوقية الحالية: {0}",
             "price": "💰 السعر الحالي: {0}",
@@ -800,7 +798,7 @@ def format_message(data: Dict, language: str = "zh") -> str:
             "community_tips": "⚠️ تحذير من المخاطر:\n -و الاستثمارات في العملات الرقمية محفوفة بالمخاطر. DYOR (قم دائمًا بالبحث بنفسك)\n • تجنب FOMO (الخوف من فقدان الفرصة) - استثمر بعقلانية\n • احترس من العمليات الاحتيالية مثل \" عملية السحب على البساط (Rug Pulls)\" وأساليب الاحتيال الأخرى\nتذكير من مجتمع MoonX:\n • ترقبوا إعلانات المجتمع للاطلاع على آخر التحديثات\n • لا تتردد في مشاركة أفكارك وتحليلاتك في المجموعة"
         },
         "fa": {
-            "title": "🟢 [MoonX] 🟢 لیست جدید / هشدار بازار 🪙:",
+            "title": "🟢 [MoonX] 🟢 لیست جدید / هشدار بازار 🪙",
             "token_info": "├ ${0} ({1}) - {2}",
             "market_cap": "💊 ارزش بازار فعلی: {0}",
             "price": "💰 قیمت فعلی: {0}",
@@ -808,527 +806,18 @@ def format_message(data: Dict, language: str = "zh") -> str:
             "launch_time": "⏳ زمان شروع: [{0}]",
             "divider": "——————————————————",
             "chain_monitoring": "🔍 نظارت زنجیره‌ای",
-            "smart_money": "🤏 ترند پول هوشمند: {0} معامله پول هوشمند در 15 دقیقه گذشته",
-            "contract_security": "بررسی امنیت:",
-            "security_item": "• مجوزها: [{0}] هانی پات: [{1}] استخر سوختگی: [{2}] لیست سیاه: [{3}]",
-            "dev_info": "اطلاعات توسعه دهنده:",
-            "dev_status": "• برگزاری اولیه: {0}",
+            "smart_money": "🤏 روند پول هوشمند: {0} معامله پول هوشمند در 15 دقیقه گذشته",
+            "contract_security": "بازرسی:",
+            "security_item": "• مجوزها: [{0}] هانی‌پات: [{1}] استخر سوختگی: [{2}] لیست سیاه: [{3}]",
+            "dev_info": "اطلاعات توسعه‌دهنده:",
+            "dev_status": "• مالکیت اولیه: {0}",
             "dev_balance": "• موجودی کیف پول توسعه دهنده: {0} SOL",
-            "top10_holding": "• 10 سهم برتر: {0}%",
-            "social_info": "مرتبط:",
-            "social_links": "🔗 اینفلوئنسر توییتر: {0} || وب سایت رسمی: {1} || تلگرام: {2} || جستجوی X: {3}",
-            "community_tips": "⚠️ هشدار خطر:\n • سرمایه گذاری در ارزهای دیجیتال بسیار پرخطر است. همیشه DYOR (خودت تحقیق کن)\n • اجتناب از FOMO (ترس از دست دادن) - سرمایه گذاری منطقی\n • مراقب قالیچه ها و دیگر تاکتیک های کلاهبرداری باشید\nیادآوری انجمن MoonX:\n • برای اطلاع از آخرین به روز رسانی ها منتظر اطلاعیه های انجمن باشید\n • با خیال راحت بینش و تحلیل خود را در گروه به اشتراک بگذارید"
-        },
-        "vn": {
-            "title": "🟢 [MoonX] 🟢 Niêm yết Mới / Biến Động Thị Trường 🪙:",
-            "token_info": "├ ${0} ({1}) – {2}",
-            "market_cap": "💊 Vốn hóa thị trường hiện tại: {0}",
-            "price": "💰 Giá hiện tại: {0}",
-            "holders": "👬 Số lượng người nắm giữ: {0}",
-            "launch_time": "⏳ Thời gian khởi tạo: [{0}]",
-            "divider": "——————————————————",
-            "chain_monitoring": "🔍 Giám sát On-chain",
-            "smart_money": "🤏 Xu hướng Smart Money: {0} giao dịch từ ví thông minh trong 15 phút qua",
-            "contract_security": "Kiểm toán:",
-            "security_item": "• Quyền truy cập: [{0}] Honeypot: [{1}] Burn Pool: [{2}] Danh sách đen: [{3}]",
-            "dev_info": "Thông tin nhà phát triển:",
-            "dev_status": "• Sở hữu ban đầu: {0}",
-            "dev_balance": "• Số dư ví Dev: {0} SOL",
-            "top10_holding": "• Tỷ lệ nắm giữ của Top 10: {0}%",
-            "social_info": "Liên quan:",
-            "social_links": "🔗 Twitter Influencer: {0} || Website chính thức: {1} || Telegram: {2} || Tìm trên Twitter: {3}",
-            "community_tips": "⚠️ Cảnh báo rủi ro:\n • Đầu tư tiền mã hóa có độ rủi ro rất cao. Luôn tự nghiên cứu (DYOR)\n • Tránh tâm lý FOMO (sợ bỏ lỡ) – Hãy đầu tư một cách lý trí\n • Cẩn thận với Rug Pull và các hình thức lừa đảo khác\nNhắc nhở từ cộng đồng MoonX:\n • Theo dõi thông báo cộng đồng để cập nhật mới nhất\n • Thoải mái chia sẻ nhận định và phân tích của bạn trong nhóm",
-            "trade_button": "⚡️Giao Dịch Nhanh⬆️",
-            "chart_button": "👉Kiểm Tra Biểu Đồ⬆️"
-        },
-        
-        # 精選信號模板
-        "premium": {
-            "zh": {
-                "title": "MoonX 精選信號",
-                "token_info": "🚀 代幣：{0}（{1}）",
-                "price": "💰 價格：${0}",
-                "contract": "📌 合約：{0}",
-                "market_cap_alert": "⚙️ {0}次預警 ⚠️ 市值達到 {1}",
-                "launch_time": "⏰ 開盤時間：{0}",
-                "token_check": "📝 代幣檢測：燒池子 {0} | 權限 {1} | TOP10 {2}% {3} | 貔貅 {4}",
-                "links": "🔗 MoonX K線：{0}\n🔍 X討論：{1}",
-                "highlight_tags": "🔥 亮點：{0}",
-                "divider": ""
-            },
-            "en": {
-                "title": "MoonX Featured Signal",
-                "token_info": "🚀 Token: {0} ({1})",
-                "price": "💰 Price: ${0}",
-                "contract": "📌 Contract: {0}",
-                "market_cap_alert": "⚙️ {0} Warning ⚠️ MCap reached {1}",
-                "launch_time": "⏰ Start Time: {0}",
-                "token_check": "📝 Audit: Burn Pool {0} | Permission {1} | TOP10 {2}% {3} | Honeypot {4}",
-                "links": "🔗 MoonX Chart: {0}\n🔍 X Discussion: {1}",
-                "highlight_tags": "🔥 Highlights: {0}",
-                "divider": ""
-            },
-            "ru": {
-                "title": "MoonX Рекомендованный сигнал",
-                "token_info": "🚀 Токен: {0} ({1})",
-                "price": "💰 Цена: ${0}",
-                "contract": "📌 Контракт: {0}",
-                "market_cap_alert": "⚙️ Уведомление: Предупреждение {0} ⚠️ Р. Кап. {1}",
-                "launch_time": "⏰ Время старта: {0}",
-                "token_check": "📝 Аудит: Пул сжигания {0} | Права доступа {1} | ТОП10 {2}% {3} | Honeypot {4}",
-                "links": "🔗 График MoonX: {0}\n🔍 Обсуждение в X: {1}",
-                "highlight_tags": "🔥 Выделенные метки: {0}",
-                "divider": ""
-            },
-            "id": {
-                "title": "Sinyal Unggulan MoonX",
-                "token_info": "🚀 Token: {0} ({1})",
-                "price": "💰 Harga: ${0}",
-                "contract": "📌 Kontrak: {0}",
-                "market_cap_alert": "⚙️ Alert: Peringatan {0} ⚠️ MCap mencapai {1}",
-                "launch_time": "⏰ Waktu Mulai: {0}",
-                "token_check": "📝 Audit: Burn Pool {0} | Permission {1} | TOP10 {2}% {3} | Honeypot {4}",
-                "links": "🔗 MoonX Chart: {0}\n🔍 X Diskusi: {1}",
-                "highlight_tags": "🔥 Key Highlights: {0}",
-                "divider": ""
-            },
-            "ja": {
-                "title": "MoonX 注目シグナル",
-                "token_info": "🚀 トークン: {0}（{1}）",
-                "price": "💰 価格: ${0}",
-                "contract": "📌 コントラクト: {0}",
-                "market_cap_alert": "⚙️ アラート: 第{0}警告 ⚠️ MCapが{1}に到達",
-                "launch_time": "⏰ 開始時間: {0}",
-                "token_check": "📝 セキュリティ監査: Burn Pool {0} | パーミッション {1} | 上位10アドレスの保有率 {2}% {3} | ハニーポット対策 {4}",
-                "links": "🔗 MoonX チャート: {0}\n🔍 X（旧Twitter）での議論: {1}",
-                "highlight_tags": "🔥 注目マーク: {0}",
-                "divider": ""
-            },
-            "pt": {
-                "title": "Sinal em Destaque da MoonX",
-                "token_info": "🚀 Token: {0} ({1})",
-                "price": "💰 Preço: ${0}",
-                "contract": "📌 Contrato: {0}",
-                "market_cap_alert": "⚙️ Alerta: {0} Aviso ⚠️ MCap atingiu {1}",
-                "launch_time": "⏰ Tempo de Início: {0}",
-                "token_check": "📝 Audit: Burn Pool {0} | Permissões {1} | TOP10 {2}% {3} | Honeypot {4}",
-                "links": "🔗 Gráfico MoonX: {0}\n🔍 Discussão no X (Twitter): {1}",
-                "highlight_tags": "🔥 Principais Destaques: {0}",
-                "divider": ""
-            },
-            "fr": {
-                "title": "Signal en vedette sur MoonX",
-                "token_info": "🚀 Token : {0} ({1})",
-                "price": "💰 Prix : ${0}",
-                "contract": "📌 Contrat : {0}",
-                "market_cap_alert": "⚙️ Alerte : {0} alerte ⚠️ MCap atteint {1}",
-                "launch_time": "⏰ Heure de lancement : {0}",
-                "token_check": "📝 Audit : Burn Pool {0} | Permissions {1} | TOP10 détient {2}% {3} | Honeypot {4}",
-                "links": "🔗 Graphique MoonX : {0}\n🔍 Discussion sur X : {1}",
-                "highlight_tags": "🔥 Points forts : {0}",
-                "divider": ""
-            },
-            "es": {
-                "title": "MoonX Signal Destacado",
-                "token_info": "🚀 Token: {0} ({1})",
-                "price": "💰 Precio: ${0}",
-                "contract": "📌 Contrato: {0}",
-                "market_cap_alert": "⚙️ Alerta: {0} Aviso ⚠️ MCap alcanzó {1}",
-                "launch_time": "⏰ Hora de Inicio: {0}",
-                "token_check": "📝 Auditoría: Burn Pool {0} | Permiso {1} | TOP10 {2}% {3} | Honeypot {4}",
-                "links": "🔗 Gráfico de MoonX: {0}\n🔍 Discusión en X: {1}",
-                "highlight_tags": "🔥 Aspectos Clave: {0}",
-                "divider": ""
-            },
-            "tr": {
-                "title": "MoonX Öne Çıkan Sinyal",
-                "token_info": "🚀 Token: {0} ({1})",
-                "price": "💰 Fiyat: ${0}",
-                "contract": "📌 Kontrat: {0}",
-                "market_cap_alert": "⚙️ Uyarı: {0} Uyarı ⚠️ MCap {1}'ye ulaştı",
-                "launch_time": "⏰ Başlangıç Zamanı: {0}",
-                "token_check": "📝 Denetim: Yakım Havuzu {0} | Yetki {1} | TOP10 {2}% {3} | Honeypot {4}",
-                "links": "🔗 MoonX Grafiği: {0}\n🔍 X Tartışması: {1}",
-                "highlight_tags": "🔥 Temel Noktalar: {0}",
-                "divider": ""
-            },
-            "de": {
-                "title": "MoonX Vorgestelltes Signal",
-                "token_info": "🚀 Token: {0} ({1})",
-                "price": "💰 Preis: ${0}",
-                "contract": "📌 Vertrag: {0}",
-                "market_cap_alert": "⚙️ Alarm: {0} Warnung ⚠️ MCap hat {1} erreicht",
-                "launch_time": "⏰ Startzeit: {0}",
-                "token_check": "📝 Prüfung: Burn-Pool {0} | Berechtigungen {1} | TOP10 {2}% {3} | Honeypot {4}",
-                "links": "🔗 MoonX-Chart: {0}\n🔍 X-Diskussion: {1}",
-                "highlight_tags": "🔥 Wichtige Punkte: {0}",
-                "divider": ""
-            },
-            "it": {
-                "title": "Segnale in Evidenza MoonX",
-                "token_info": "🚀 Token: {0} ({1})",
-                "price": "💰 Prezzo: ${0}",
-                "contract": "📌 Contratto: {0}",
-                "market_cap_alert": "⚙️ Avviso: {0} Avvertimento ⚠️ MCap raggiunta {1}",
-                "launch_time": "⏰ Ora di Lancio: {0}",
-                "token_check": "📝 Controllo: Pool di Burn {0} | Permessi {1} | TOP10 {2}% {3} | Honeypot {4}",
-                "links": "🔗 Grafico MoonX: {0}\n🔍 Discussione su X: {1}",
-                "highlight_tags": "🔥 Punti Chiave: {0}",
-                "divider": ""
-            },
-            "ar": {
-                "title": "إشارة مميزة من MoonX",
-                "token_info": "🚀 الرمز: {0} ({1})",
-                "price": "💰 السعر: ${0}",
-                "contract": "📌 العقد: {0}",
-                "market_cap_alert": "⚙️ التنبيه: التحذير {0} ⚠️ MCap وصلت إلى {1}",
-                "launch_time": "⏰ وقت البدء: {0}",
-                "token_check": "📝 التدقيق: مجموعة الحرق {0} | الأذونات {1} | أفضل 10: {2}% {3} | فخ العسل {4}",
-                "links": "🔗 رسم بياني من MoonX: {0}\n🔍 نقاش X: {1}",
-                "highlight_tags": "🔥 أبرز الأحداث: {0}",
-                "divider": ""
-            },
-            "fa": {
-                "title": "سیگنال ویژه MoonX",
-                "token_info": "🚀 نشانه: {0} ({1})",
-                "price": "💰 قیمت: ${0}",
-                "contract": "📌 قرارداد: {0}",
-                "market_cap_alert": "⚙️ هشدار: {0} هشدار ⚠️ MCap به {1} رسید",
-                "launch_time": "⏰ زمان شروع: {0}",
-                "token_check": "📝 ممیزی: استخر سوختگی {0} | مجوز {1} | TOP10 {2}% {3} | هانی پات {4}",
-                "links": "🔗 نمودار MoonX: {0}\n🔍 X بحث: {1}",
-                "highlight_tags": "🔥 نکات برجسته کلیدی: {0}",
-                "divider": ""
-            },
-            "vn": {
-                "title": "MoonX - Tín Hiệu Nổi Bật",
-                "token_info": "🚀 Token: {0} ({1})",
-                "price": "💰 Giá: ${0}",
-                "contract": "📌 Hợp đồng: {0}",
-                "market_cap_alert": "⚙️ Lưu ý: Cảnh báo lần {0} ⚠️ Vốn hóa đạt {1}",
-                "launch_time": "⏰ Thời gian mở giao dịch: {0}",
-                "token_check": "📝 Kiểm tra Token: Burn Pool: {0} | Quyền truy cập: {1} | Top 10 nắm giữ: {2}% {3} | Honeypot {4}",
-                "links": "🔗 MoonX (K-line): {0}\n🔍 Thảo luận trên X: {1}",
-                "highlight_tags": "🔥 Tín hiệu: {0}",
-                "divider": ""
-            }
-        }
-    }
-    return templates
-
-def format_message(data: Dict, language: str = "zh") -> str:
-    """將加密貨幣數據格式化為消息，支持多語言"""
-    # 加載多語言模板
-    templates = {
-        "zh": {
-            "title": "🟢 [MOONX] 🟢 新币上线 / 异动播报 🪙  :",
-            "token_info": "├ ${0} - {1}\n├ {2}",
-            "market_cap": "💊 当前市值：{0}",
-            "price": "💰 当前价格：$ {0}",
-            "holders": "👬 持币人：{0}",
-            "launch_time": "⏳ 开盘时间： [{0}]",
-            "divider": "——————————————————",
-            "chain_monitoring": "🔍 链上监控",
-            "smart_money": "聪明钱 {0} 笔买入 (15分钟内)",
-            "contract_security": "合约安全：",
-            "security_item": "- 权限：[{0}]  貔貅: [{1}]  烧池子 [{2}]  黑名单 [{3}]",
-            "dev_info": "💰 开发者：",
-            "dev_status": "- {0}",
-            "dev_balance": "- 开发者余额：{0} SOL",
-            "top10_holding": "- Top10占比：{0}%",
-            "social_info": "🌐 社交与工具",
-            "social_links": "{0}",
-            "community_tips": "🚨 MOONX 社区提示\n- 防范Rug Pull，务必验证合约权限与流动性锁仓。\n- 关注社区公告，欢迎分享观点与资讯。"
-        },
-        "en": {
-            "title": "🟢 [MoonX] 🟢 New Listing / Market Alert 🪙:",
-            "token_info": "├ ${0} - {1}\n├ {2}",
-            "market_cap": "💊 Current Market Cap: {0}",
-            "price": "💰 Current Price: $ {0}",
-            "holders": "👬 Holders: {0}",
-            "launch_time": "⏳ Start Time: [{0}]",
-            "divider": "——————————————————",
-            "chain_monitoring": "🔍 On-chain Monitoring",
-            "smart_money": "🤏 Smart Money Trend: {0} smart money trades in the last 15 minutes",
-            "contract_security": "Audit:",
-            "security_item": "• Permissions: [{0}] Honeypot: [{1}] Burn Pool: [{2}] Blacklist: [{3}]",
-            "dev_info": "Developer Info:",
-            "dev_status": "• Initial Holding: {0}",
-            "dev_balance": "• Dev Wallet Balance: {0} SOL",
-            "top10_holding": "• Top 10 Holder Share: {0}%",
-            "social_info": "🌐 Related:",
-            "social_links": "Twitter Influencer: {0} || Official Website: {1} || Telegram: {2} || Search X: {3}",
-            "community_tips": "⚠️ Risk Warning:\n • Cryptocurrency investments are extremely risky. Always DYOR (Do Your Own Research)\n • Avoid FOMO (Fear of Missing Out) – Invest rationally\n • Watch out for Rug Pulls and other scam tactics\nMoonX Community Reminder:\n • Stay tuned to community announcements for the latest updates\n • Feel free to share your insights and analysis in the group"
-        },
-        "ko": {
-            "title": "🟢 [MOONX] 🟢 새 코인 상장 / 활동 알림 🪙  :",
-            "token_info": "├ ${0} - {1}\n├ {2}",
-            "market_cap": "💊 현재 시가총액: {0}",
-            "price": "💰 현재 가격: $ {0}",
-            "holders": "👬 홀더 수: {0}",
-            "launch_time": "⏳ 출시 시간: [{0}]",
-            "divider": "——————————————————",
-            "chain_monitoring": "🔍 온체인 모니터링",
-            "smart_money": "스마트 머니 {0건 구매 (15분 이내)",
-            "contract_security": "컨트랙트 보안:",
-            "security_item": "- 권한: [{0}]  러그풀: [{1}]  LP소각: [{2}]  블랙리스트: [{3}]",
-            "dev_info": "💰 개발자:",
-            "dev_status": "- {0}",
-            "dev_balance": "- 개발자 잔액: {0} SOL",
-            "top10_holding": "- 상위10 보유율: {0}%",
-            "social_info": "🌐 소셜 및 도구",
-            "social_links": "{0}",
-            "community_tips": "🚨 MOONX 커뮤니티 팁\n- 컨트랙트 권한 및 유동성 잠금을 확인하여 러그풀을 방지하세요.\n- 커뮤니티 공지를 확인하고 인사이트를 공유하세요."
-        },
-        "ch": {
-            "title": "🟢 [MoonX] 🟢 新幣上線 / 異動播報 🪙 ：",
-            "token_info": "├ ${0} ({1}) – {2}",
-            "market_cap": "💊 當前市值：{0}",
-            "price": "💰 當前價格：{0}",
-            "holders": "👬 持幣人數：{0}",
-            "launch_time": "⏳ 開盤時間：[{0}]",
-            "divider": "——————————————————",
-            "chain_monitoring": "🔍 鏈上監控",
-            "smart_money": "🤏 聰明錢動向：15 分鐘內有 {0} 筆聰明錢交易",
-            "contract_security": "代幣檢測：",
-            "security_item": "• 權限：[{0}] 貔貅：[{1}] 燒池子：[{2}] 黑明單：[{3}]",
-            "dev_info": "開發者：",
-            "dev_status": "• 開盤持有量：{0}",
-            "dev_balance": "• 開發者錢包餘額：{0} SOL",
-            "top10_holding": "• Top10 占比：{0}%",
-            "social_info": "相關：",
-            "social_links": "{0}",
-            "community_tips": "⚠️ 風險提示：\n• 加密貨幣投資風險極高，請務必DYOR (Do Your Own Research)\n• 請勿FOMO (Fear of Missing Out)，理性投資\n• 請小心Rug Pull (捲款跑路) 及其他詐騙行為\nMoonX 社群提醒：\n• 請關注社群公告，掌握最新資訊\n• 歡迎在社群中分享您的觀點與分析"
-        },
-        "ru": {
-            "title": "🟢 [MoonX] 🟢 Новая монета / Рыночное уведомление 🪙:",
-            "token_info": "├ ${0} ({1}) – {2}",
-            "market_cap": "💊 Рыночная капитализация: {0}",
-            "price": "💰 Текущая цена: {0}",
-            "holders": "👬 Владельцев: {0}",
-            "launch_time": "⏳ Время запуска: [{0}]",
-            "divider": "——————————————————",
-            "chain_monitoring": "🔍 Мониторинг блокчейна",
-            "smart_money": "🤏 Активность смарт-денег: {0} сделки за последние 15 минут",
-            "contract_security": "Аудит:",
-            "security_item": "• Права: [{0}] Ханипот: [{1}] Пул сжигания: [{2}] Чёрный список: [{3}]",
-            "dev_info": "Информация о разработчике:",
-            "dev_status": "• Первоначальные активы: {0}",
-            "dev_balance": "• Баланс кошелька разработчика: {0} SOL",
-            "top10_holding": "• Доля топ-10 держателей: {0}%",
-            "social_info": "Ссылки:",
-            "social_links": "{0}",
-            "community_tips": "⚠️ Предупреждение о рисках:\n • Инвестиции в криптовалюты крайне рискованны. Всегда проводите собственный анализ (DYOR)\n • Избегайте FOMO (Fear of Missing Out) – инвестируйте обдуманно\n • Будьте осторожны с Rug Pull и другими мошенническими схемами\nСообщество MoonX напоминает:\n • Следите за новостями в чате для актуальных обновлений\n • Делитесь своим мнением и аналитикой в группе"
-        },
-        "id": {
-            "title": "🟢 [MoonX] 🟢 Listing Baru / Peringatan Pasar🪙:",
-            "token_info": "├ ${0} ({1}) – {2}",
-            "market_cap": "💊 Mcap Saat Ini: {0}",
-            "price": "💰 Harga Saat Ini: {0}",
-            "holders": "👬 Holder: {0}",
-            "launch_time": "⏳ Waktu Mulai: [{0}]",
-            "divider": "——————————————————",
-            "chain_monitoring": "🔍 Pemantauan On-chain",
-            "smart_money": "🤏 Tren Smart Money: {0} perdagangan smart money dalam 15 menit terakhir",
-            "contract_security": "Audit:",
-            "security_item": "• Izin: [{0}] Honeypot: [{1}] Burn Pool: [{2}] Daftar Hitam: [{3}]",
-            "dev_info": "Info Pengembang:",
-            "dev_status": "• Kepemilikan Awal: {0}",
-            "dev_balance": "• Saldo Dompet Pengembang: {0} SOL",
-            "top10_holding": "• Pembagian Top 10 Holder : {0}%",
-            "social_info": "Terkait:",
-            "social_links": "{0}",
-            "community_tips": "⚠️ Peringatan Risiko:\n• Investasi aset kripto sangat berisiko. Selalu DYOR (Do Your Own Research)\n• Hindari FOMO (Fear of Missing Out) - Berinvestasi secara rasional\n• Waspada terhadap Rug Pulls dan taktik penipuan lainnya\nPengingat Komunitas MoonX:\n• Nantikan pengumuman komunitas untuk pembaruan terbaru\n• Jangan ragu untuk membagikan insight dan analisis Anda di grup"
-        },
-        "ja": {
-            "title": "🟢【MoonX】🟢 新規上場 / マーケットアラート 🪙",
-            "token_info": "├ ${0} - {1}\n├ {2}",
-            "market_cap": "💊 現在の時価総額：{0}",
-            "price": "💰 現在価格：{0}",
-            "holders": "👬 保有者数：{0}人",
-            "launch_time": "⏳ 開始日時：［{0}］",
-            "divider": "——————————————————",
-            "chain_monitoring": "🔍 オンチェーン監視",
-            "smart_money": "🤏 スマートマネーの動向：過去15分間にスマートマネーによる取引が{0}件",
-            "contract_security": "セキュリティ監査：",
-            "security_item": " • パーミッション（許可）：[{0}] ハニーポット：[{1}]焼却プール：[{2}]ブラックリスト：[{3}]",
-            "dev_info": "開発者情報：",
-            "dev_status": "• 初期保有率：{0}",
-            "dev_balance": "• 開発者ウォレット残高：{0} SOL",
-            "top10_holding": "• トップ10ホルダーの保有率：{0}%",
-            "social_info": "関連リンク：",
-            "social_links": "{0}",
-            "community_tips": "⚠️ リスク警告：\n • 仮想通貨投資は非常に高リスクです。必ずご自身で調査（DYOR）を行ってください\n • FOMO（乗り遅れる恐怖）に注意して、冷静に投資を行いましょう\n • ラグプル（詐欺的な資金引き抜き）やその他の詐欺手口にも注意\nMoonXコミュニティからのリマインダー：\n • 最新情報はコミュニティの発表をチェック！\n • ご自身の分析や見解も、グループで気軽にシェアしてください"
-        },
-        "pt": {
-            "title": "🟢 [MoonX] 🟢 Nova Listagem / Alerta de Mercado 🪙",
-            "token_info": "├ ${0} - {1}\n├ {2}",
-            "market_cap": "💊 Valor de Mercado Atual: {0}",
-            "price": "💰 Preço Atual: {0}",
-            "holders": "👬 Detentores: {0}",
-            "launch_time": "⏳ Início: [{0}]",
-            "divider": "——————————————————",
-            "chain_monitoring": "🔍 Monitoramento On-chain",
-            "smart_money": "🤏 Tendência de Smart Money: {0} transações de smart money nos últimos 15 minutos",
-            "contract_security": "Audit:",
-            "security_item": "• Permissões: [{0}] Honeypot: [{1}] Pool de Queima: [{2}] Lista Negra: [{3}]",
-            "dev_info": "Informações do Desenvolvedor:",
-            "dev_status": "• Participação Inicial: {0}",
-            "dev_balance": "• Saldo da Carteira Dev: {0} SOL",
-            "top10_holding": "• Participação dos 10 Maiores Detentores: {0}%",
-            "social_info": "Relacionados:",
-            "social_links": "{0}",
-            "community_tips": "⚠️ Aviso de Risco:\n • Investimentos em criptomoedas são extremamente arriscados. Sempre faça sua própria pesquisa (DYOR)\n • Evite o FOMO (medo de ficar de fora) – Invista com racionalidade\n • Fique atento a rug pulls e outras táticas de golpe\nLembrete da Comunidade MoonX:\n • Acompanhe os anúncios da comunidade para as atualizações mais recentes\n • Sinta-se à vontade para compartilhar suas análises e opiniões no grupo"
-        },
-        "fr": {
-            "title": "🟢 [MoonX] 🟢 Nouvelle Cotation / Alerte Marché 🪙",
-            "token_info": "├ ${0} - {1}\n├ {2}",
-            "market_cap": "💊 Capitalisation boursière actuelle : {0}",
-            "price": "💰 Prix actuel : {0}",
-            "holders": "👬 Nombre de détenteurs : {0}",
-            "launch_time": "⏳ Heure de lancement : [{0}]",
-            "divider": "——————————————————",
-            "chain_monitoring": "🔍 Surveillance On-chain",
-            "smart_money": "🤏 Tendance Smart Money : {0} transactions de smart money au cours des 15 dernières minutes",
-            "contract_security": "Audit :",
-            "security_item": "• Permissions : [{0}] Honeypot : [{1}] Burn Pool : [{2}] Liste noire : [{3}]",
-            "dev_info": "Informations sur le développeur :",
-            "dev_status": "• Possession initiale : {0}",
-            "dev_balance": "• Solde du portefeuille développeur : {0} SOL",
-            "top10_holding": "• Part détenue par le Top 10 : {0}%",
-            "social_info": "Liens associés :",
-            "social_links": "🔗 Influenceur Twitter : {0} || Site officiel : {1} || Telegram : {2} || Recherche sur X : {3}",
-            "community_tips": "⚠️ Avertissement sur les risques :\n • Les investissements en cryptomonnaie sont extrêmement risqués. Faites toujours vos propres recherches (DYOR).\n • Évitez le FOMO (peur de rater une opportunité) – Investissez de manière rationnelle.\n • Méfiez-vous des Rug Pulls et autres arnaques.\nRappel à la communauté MoonX :\n • Restez à l'écoute des annonces de la communauté pour les dernières mises à jour.\n • N'hésitez pas à partager vos analyses et observations dans le groupe.",
-            "trade_button": "⚡️Commerce Rapide⬆️",
-            "chart_button": "👉Voir Graphique⬆️"
-        },
-        "es": {
-            "title": "🟢 [MoonX] 🟢 Nueva Lista / Alerta de Mercado 🪙:",
-            "token_info": "├ ${0} - {1}\n├ {2}",
-            "market_cap": "💊 Capitalización de Mercado Actual: {0}",
-            "price": "💰 Precio Actual: {0}",
-            "holders": "👬 Holders: {0}",
-            "launch_time": "⏳ Hora de Inicio: [{0}]",
-            "divider": "——————————————————",
-            "chain_monitoring": "🔍 Monitoreo On-chain",
-            "smart_money": "🤏 Tendencia de Smart Money: {0} operaciones de smart money en los últimos 15 minutos",
-            "contract_security": "Auditoría:",
-            "security_item": "• Permisos: [{0}] Honeypot: [{1}] Burn Pool: [{2}] Lista negra: [{3}]",
-            "dev_info": "Info del Desarrollador:",
-            "dev_status": "• Tenencia inicial: {0}",
-            "dev_balance": "• Balance del wallet del dev: {0} SOL",
-            "top10_holding": "• Participación del Top 10 de holders: {0}%",
-            "social_info": "Relacionado:",
-            "social_links": "🔗 Twitter Influencer: {0} || Sitio Web Oficial: {1} || Telegram: {2} || Buscar en X: {3}",
-            "community_tips": "⚠️ Advertencia de Riesgo:\n • Las inversiones en criptomonedas son extremadamente riesgosas. Siempre haz tu propia investigación (DYOR)\n • Evita el FOMO (miedo a quedarse fuera) – Invierte racionalmente\n • Cuidado con los rug pulls y otras estafas\nRecordatorio de la Comunidad MoonX:\n • Mantente atento a los anuncios de la comunidad para conocer las últimas actualizaciones\n • Siéntete libre de compartir tus análisis e ideas en el grupo",
-            "trade_button": "⚡️Comercio Rápido⬆️",
-            "chart_button": "👉Ver Gráfico⬆️"
-        },
-        "tr": {
-            "title": "🟢 [MoonX] 🟢 Yeni Listeleme / Pazar Uyarısı 🪙:",
-            "token_info": "├ ${0} - {1}\n├ {2}",
-            "market_cap": "💊 Mevcut Piyasa Değeri: {0}",
-            "price": "💰 Mevcut Fiyat: {0}",
-            "holders": "👬 Sahipler: {0}",
-            "launch_time": "⏳ Başlangıç Zamanı: [{0}]",
-            "divider": "——————————————————",
-            "chain_monitoring": "🔍 Zincir Üzeri İzleme",
-            "smart_money": "🤏 Akıllı Para Trendi: Son 15 dakikada {0} akıllı para işlemi",
-            "contract_security": "Denetim:",
-            "security_item": "• İzinler: [{0}] Honeypot: [{1}] Burn Pool: [{2}] Blacklist: [{3}]",
-            "dev_info": "Geliştirici Bilgisi:",
-            "dev_status": "• Başlangıç Sahipliği: {0}",
-            "dev_balance": "• Geliştirici Cüzdan Bakiyesi: {0} SOL",
-            "top10_holding": "• İlk 10 Sahibin Payı: {0}%",
-            "social_info": "İlgili:",
-            "social_links": "🔗 Twitter Etkileyici: {0} || Resmi Web Sitesi: {1} || Telegram: {2} || X'te ara: {3}",
-            "community_tips": "⚠️ Risk Uyarısı:\n • Kripto para yatırımları son derece risklidir. Her zaman DYOR (Kendi Araştırmanızı Yapın)\n • FOMO (Kaçırma Korkusu)dan kaçının – Mantıklı bir şekilde yatırım yapın\n • Rug Pull ve diğer dolandırıcılık taktiklerine karşı dikkatli olun\nMoonX Topluluk Hatırlatması:\n • En son güncellemeler için topluluk duyurularını takip edin\n • Grup içinde görüşlerinizi ve analizlerinizi paylaşmaktan çekinmeyin",
-            "trade_button": "⚡️Hızlı İşlem⬆️",
-            "chart_button": "👉Grafiği Kontrol Et⬆️"
-        },
-        "de": {
-            "title": "🟢 [MoonX] 🟢 Neue Listung / Marktmitteilung 🪙:",
-            "token_info": "├ ${0} ({1}) – {2}",
-            "market_cap": "💊 Aktuelle Marktkapitalisierung: {0}",
-            "price": "💰 Aktueller Preis: {0}",
-            "holders": "👬 Halter: {0}",
-            "launch_time": "⏳ Startzeit: [{0}]",
-            "divider": "——————————————————",
-            "chain_monitoring": "🔍 On-Chain-Überwachung",
-            "smart_money": "🤏 Smart-Money-Trend: {0} Smart-Money-Transaktionen in den letzten 15 Minuten",
-            "contract_security": "Prüfung:",
-            "security_item": "• Berechtigungen: [{0}] Honeypot: [{1}] Burn Pool: [{2}] Blacklist: [{3}]",
-            "dev_info": "Entwicklerinformationen:",
-            "dev_status": "• Anfänglicher Halteanteil: {0}",
-            "dev_balance": "• Entwickler-Wallet-Guthaben: {0} SOL",
-            "top10_holding": "• Anteil der Top-10-Halter: {0}%",
-            "social_info": "Zugehörige Links:",
-            "social_links": "🔗 Twitter-Influencer: {0} || Offizielle Website: {1} || Telegram: {2} || Suche auf X: {3}",
-            "community_tips": "⚠️ Risikohinweis:\n• Kryptowährungsinvestitionen sind extrem riskant. Führen Sie stets eigene Recherchen durch (DYOR).\n• Vermeiden Sie FOMO (Fear of Missing Out) – Investieren Sie rational.\n• Achten Sie auf Rug Pulls und andere Betrugsmethoden.\nHinweis der MoonX-Community:\n• Bleiben Sie über Community-Ankündigungen auf dem Laufenden.\n• Teilen Sie gerne Ihre Erkenntnisse und Analysen in der Gruppe.",
-            "trade_button": "⚡️Schnellhandel⬆️",
-            "chart_button": "👉Chart Prüfen⬆️"
-        },
-        "it": {
-            "title": "🟢 [MoonX] 🟢 Nuove Inserzioni / Avviso di Mercato 🪙:",
-            "token_info": "├ ${0} ({1}) – {2}",
-            "market_cap": "💊 Cap di Mercato Attuale: {0}",
-            "price": "💰 Prezzo Attuale: {0}",
-            "holders": "👬 Detentori: {0}",
-            "launch_time": "⏳ Ora di Inizio: [{0}]",
-            "divider": "——————————————————",
-            "chain_monitoring": "🔍 Monitoraggio On-chain",
-            "smart_money": "🤏 Trend Smart Money: {0} azioni di trading di Smart Money negli ultimi 15 minuti",
-            "contract_security": "Controllo:",
-            "security_item": "• Permessi: [{0}] Honeypot: [{1}] Pool di Burn: [{2}] Blacklist: [{3}]",
-            "dev_info": "Informazioni sullo Sviluppatore:",
-            "dev_status": "• Detenzione Iniziale: {0}",
-            "dev_balance": "• Saldo del Wallet dello Sviluppatore: {0} SOL",
-            "top10_holding": "• Quota dei Primi 10 Detentori: {0}%",
-            "social_info": "Correlato:",
-            "social_links": "🔗 Influencer su Twitter: {0} || Sito Ufficiale: {1} || Telegram: {2} || Cerca X: {3}",
-            "community_tips": "⚠️ Avviso di Rischio:\n• Gli investimenti in criptovalute sono estremamente rischiosi. Fai sempre le tue ricerche (DYOR)\n• Evita il FOMO (Paura di Perdere un'Opportunità) – Investi in modo razionale\n• Fai attenzione ai Rug Pulls e ad altre tattiche fraudolente\nPromemoria della Comunità MoonX:\n• Resta aggiornato sugli annunci della comunità per le ultime novità\n• Sentiti libero di condividere le tue intuizioni e analisi nel gruppo",
-            "trade_button": "⚡️Trading Rapido⬆️",
-            "chart_button": "👉Controlla Grafico⬆️"
-        },
-        "ar": {
-            "title": "🟢 [MoonX] 🟢 قائمة جديدة / تنبيه السوق 🟢:",
-            "token_info": "├ ${0} ({1}) – {2}",
-            "market_cap": "💊 القيمة السوقية الحالية: {0}",
-            "price": "💰 السعر الحالي: {0}",
-            "holders": "👬 حاملو السندات: {0}",
-            "launch_time": "⏳ وقت البدء: [{0}]",
-            "divider": "——————————————————",
-            "chain_monitoring": "🔍 مراقبة البلوكتشين",
-            "smart_money": "🤏 اتجاه المال الذكي: {0} تداولات أموال ذكية في آخر 15 دقيقة",
-            "contract_security": ":التدقيق",
-            "security_item": "• الأذونات: [{0}] نقطة التداوُل: [{1}] مجموعة الحرق: [{2}] قائمة الحرق: [{3}]",
-            "dev_info": "معلومات المطور:",
-            "dev_status": "• الحيازة الأولية {0}",
-            "dev_balance": "• رصيد محفظة المطور: {0} سول",
-            "top10_holding": "• أفضل 10 حائزين على أعلى 10 حصص {0}%",
-            "social_info": "🔗 ذات صلة",
-            "social_links": "مؤثر تويتر: {0} | | الموقع الرسمي: {1} | | | تيليجرام {2} | | بحث X: {3}",
-            "community_tips": "⚠️ تحذير من المخاطر:\n -و الاستثمارات في العملات الرقمية محفوفة بالمخاطر. DYOR (قم دائمًا بالبحث بنفسك)\n • تجنب FOMO (الخوف من فقدان الفرصة) - استثمر بعقلانية\n • احترس من العمليات الاحتيالية مثل \" عملية السحب على البساط (Rug Pulls)\" وأساليب الاحتيال الأخرى\nتذكير من مجتمع MoonX:\n • ترقبوا إعلانات المجتمع للاطلاع على آخر التحديثات\n • لا تتردد في مشاركة أفكارك وتحليلاتك في المجموعة"
-        },
-        "fa": {
-            "title": "🟢 [MoonX] 🟢 لیست جدید / هشدار بازار 🪙:",
-            "token_info": "├ ${0} ({1}) - {2}",
-            "market_cap": "💊 ارزش بازار فعلی: {0}",
-            "price": "💰 قیمت فعلی: {0}",
-            "holders": "👬 دارندگان: {0}",
-            "launch_time": "⏳ زمان شروع: [{0}]",
-            "divider": "——————————————————",
-            "chain_monitoring": "🔍 نظارت زنجیره‌ای",
-            "smart_money": "🤏 ترند پول هوشمند: {0} معامله پول هوشمند در 15 دقیقه گذشته",
-            "contract_security": "بررسی امنیت:",
-            "security_item": "• مجوزها: [{0}] هانی پات: [{1}] استخر سوختگی: [{2}] لیست سیاه: [{3}]",
-            "dev_info": "اطلاعات توسعه دهنده:",
-            "dev_status": "• برگزاری اولیه: {0}",
-            "dev_balance": "• موجودی کیف پول توسعه دهنده: {0} SOL",
-            "top10_holding": "• 10 سهم برتر: {0}%",
-            "social_info": "مرتبط:",
-            "social_links": "🔗 اینفلوئنسر توییتر: {0} || وب سایت رسمی: {1} || تلگرام: {2} || جستجوی X: {3}",
-            "community_tips": "⚠️ هشدار خطر:\n • سرمایه گذاری در ارزهای دیجیتال بسیار پرخطر است. همیشه DYOR (خودت تحقیق کن)\n • اجتناب از FOMO (ترس از دست دادن) - سرمایه گذاری منطقی\n • مراقب قالیچه ها و دیگر تاکتیک های کلاهبرداری باشید\nیادآوری انجمن MoonX:\n • برای اطلاع از آخرین به روز رسانی ها منتظر اطلاعیه های انجمن باشید\n • با خیال راحت بینش و تحلیل خود را در گروه به اشتراک بگذارید"
+            "top10_holding": "• سهم 10 دارنده برتر: {0}%",
+            "social_info": "لینک‌های مرتبط:",
+            "social_links": "🔗 اینفلوئنسر توییتر: {0} || وب‌سایت رسمی: {1} || تلگرام: {2} || جستجو در X: {3}",
+            "community_tips": "⚠️ هشدار خطر:\n • سرمایه گذاری در ارزهای دیجیتال بسیار پرخطر است. همیشه تحقیقات خود را انجام دهید (DYOR)\n • از FOMO (ترس از دست دادن) اجتناب کنید - منطقی سرمایه‌گذاری کنید\n • مراقب Rug Pull و سایر تکنیک‌های کلاهبرداری باشید\nیادآوری جامعه MoonX:\n • برای آخرین به‌روزرسانی‌ها منتظر اطلاعیه های انجمن باشید\n • با خیال راحت بینش و تحلیل خود را در گروه به اشتراک بگذارید",
+            "trade_button": "⚡️معامله سریع⬆️",
+            "chart_button": "👉بررسی نمودار⬆️"
         },
         "vn": {
             "title": "🟢 [MoonX] 🟢 Niêm yết Mới / Biến Động Thị Trường 🪙:",
@@ -1528,7 +1017,7 @@ def format_message(data: Dict, language: str = "zh") -> str:
     
     # 如果沒有該語言的模板，使用默認語言
     if language not in templates:
-        language = "zh"  # 默認使用中文
+        language = "en"  # 默認使用英文
     
     try:
         contract_security = json.loads(data.get('contract_security', '{}'))
@@ -1539,12 +1028,61 @@ def format_message(data: Dict, language: str = "zh") -> str:
         socials = {}
 
     # 安全項目格式化
-    security_status = templates[language]["security_item"].format(
-        '✅' if contract_security.get('authority', False) else '❌',
-        '✅' if contract_security.get('rug_pull', False) else '❌',
-        '✅' if contract_security.get('burn_pool', False) else '❌',
-        '✅' if contract_security.get('blacklist', False) else '❌'
-    )
+    lang_texts = {
+        'zh': { 'burned_pool': '已燒池子', 'not_burned_pool': '未燒池子', 'not_honeypot': '非貔貅', 'is_honeypot': '是貔貅', 'authority_renounced': '已丟棄權限', 'authority_not_renounced': '未丟棄權限' },
+        'ch': { 'burned_pool': '已燒池子', 'not_burned_pool': '未燒池子', 'not_honeypot': '非貔貅', 'is_honeypot': '是貔貅', 'authority_renounced': '已丟棄權限', 'authority_not_renounced': '未丟棄權限' },
+        'en': { 'burned_pool': 'Pool Burned', 'not_burned_pool': 'Pool Not Burned', 'not_honeypot': 'Not Honeypot', 'is_honeypot': 'Honeypot', 'authority_renounced': 'Renounced', 'authority_not_renounced': 'Mutable' },
+        'ko': { 'burned_pool': '풀 소각됨', 'not_burned_pool': '풀 미소각', 'not_honeypot': '허니팟 아님', 'is_honeypot': '허니팟', 'authority_renounced': '권한 포기됨', 'authority_not_renounced': '권한 유지' },
+        'ja': { 'burned_pool': 'プール焼却済', 'not_burned_pool': 'プール未焼却', 'not_honeypot': 'ハニーポットではない', 'is_honeypot': 'ハニーポット', 'authority_renounced': '権限放棄済', 'authority_not_renounced': '権限未放棄' },
+        'ru': { 'burned_pool': 'Пул сожжен', 'not_burned_pool': 'Пул не сожжен', 'not_honeypot': 'Не ханипот', 'is_honeypot': 'Ханипот', 'authority_renounced': 'Права отозваны', 'authority_not_renounced': 'Права не отозваны' },
+        'id': { 'burned_pool': 'Pool Dibakar', 'not_burned_pool': 'Pool Tidak Dibakar', 'not_honeypot': 'Bukan Honeypot', 'is_honeypot': 'Honeypot', 'authority_renounced': 'Dilepas', 'authority_not_renounced': 'Dapat Diubah' },
+        'pt': { 'burned_pool': 'Pool Queimado', 'not_burned_pool': 'Pool Não Queimado', 'not_honeypot': 'Não Honeypot', 'is_honeypot': 'Honeypot', 'authority_renounced': 'Renunciado', 'authority_not_renounced': 'Mutável' },
+        'fr': { 'burned_pool': 'Pool Brûlé', 'not_burned_pool': 'Pool Non Brûlé', 'not_honeypot': 'Pas Honeypot', 'is_honeypot': 'Honeypot', 'authority_renounced': 'Renoncé', 'authority_not_renounced': 'Modifiable' },
+        'es': { 'burned_pool': 'Pool Quemado', 'not_burned_pool': 'Pool No Quemado', 'not_honeypot': 'No Honeypot', 'is_honeypot': 'Honeypot', 'authority_renounced': 'Renunciado', 'authority_not_renounced': 'Mutable' },
+        'tr': { 'burned_pool': 'Havuz Yakıldı', 'not_burned_pool': 'Havuz Yakılmadı', 'not_honeypot': 'Honeypot Değil', 'is_honeypot': 'Honeypot', 'authority_renounced': 'Vazgeçildi', 'authority_not_renounced': 'Değiştirilebilir' },
+        'de': { 'burned_pool': 'Pool Verbrannt', 'not_burned_pool': 'Pool Nicht Verbrannt', 'not_honeypot': 'Kein Honeypot', 'is_honeypot': 'Honeypot', 'authority_renounced': 'Verzichtet', 'authority_not_renounced': 'Veränderbar' },
+        'it': { 'burned_pool': 'Pool Bruciato', 'not_burned_pool': 'Pool Non Bruciato', 'not_honeypot': 'Non Honeypot', 'is_honeypot': 'Honeypot', 'authority_renounced': 'Rinunciato', 'authority_not_renounced': 'Mutabile' },
+        'ar': { 'burned_pool': 'تم حرق المجمع', 'not_burned_pool': 'لم يتم حرق المجمع', 'not_honeypot': 'ليس مصيدة عسل', 'is_honeypot': 'مصيدة عسل', 'authority_renounced': 'تم التنازل', 'authority_not_renounced': 'قابل للتغيير' },
+        'fa': { 'burned_pool': 'استخر سوزانده شده', 'not_burned_pool': 'استخر سوزانده نشده', 'not_honeypot': 'هانی پات نیست', 'is_honeypot': 'هانی پات', 'authority_renounced': 'صرف نظر شده', 'authority_not_renounced': 'قابل تغییر' },
+        'vn': { 'burned_pool': 'Pool Đã Đốt', 'not_burned_pool': 'Pool Chưa Đốt', 'not_honeypot': 'Không Phải Honeypot', 'is_honeypot': 'Honeypot', 'authority_renounced': 'Đã Từ Bỏ', 'authority_not_renounced': 'Có Thể Thay Đổi' },
+    }
+    
+    current_lang_texts = lang_texts.get(language, lang_texts['en'])
+    
+    security_parts = []
+
+    # 1. Burn Pool (已燒池子 / 未燒池子)
+    if 'burn_pool' in contract_security:
+        is_burned = contract_security.get('burn_pool', False)
+        text = current_lang_texts['burned_pool'] if is_burned else current_lang_texts['not_burned_pool']
+        emoji = "🟢" if is_burned else "🔴"
+        security_parts.append(f"{emoji} {text}")
+    
+    # 2. Authority (已丟棄權限 / 未丟棄權限)
+    if 'authority' in contract_security:
+        is_renounced = contract_security.get('authority', False)
+        text = current_lang_texts['authority_renounced'] if is_renounced else current_lang_texts['authority_not_renounced']
+        emoji = "🟢" if is_renounced else "🔴"
+        security_parts.append(f"{emoji} {text}")
+        
+    # 3. Top10 Holding
+    if data.get('top10_holding') is not None and data.get('top10_holding_display') != '--':
+        try:
+            top10 = float(data['top10_holding'])
+            is_low_holding = top10 <= 30
+            emoji = "🟢" if is_low_holding else "🔴"
+            security_parts.append(f"{emoji} Top10 {data.get('top10_holding_display', '--')}%")
+        except (ValueError, TypeError, KeyError):
+            pass
+
+    # 4. Rug Pull / Honeypot (非貔貅 / 是貔貅)
+    if 'rug_pull' in contract_security:
+        is_not_honeypot = contract_security.get('rug_pull', False)
+        text = current_lang_texts['not_honeypot'] if is_not_honeypot else current_lang_texts['is_honeypot']
+        emoji = "🟢" if is_not_honeypot else "🔴"
+        security_parts.append(f"{emoji} {text}")
+
+    security_status = " | ".join(security_parts)
 
     # 構建推特搜索鏈接 - 根據語言可能有不同的文本
     token_address = data.get('token_address', '')
@@ -1676,8 +1214,8 @@ def format_premium_message(data: Dict, language: str = "zh") -> str:
             1: "Acquisto da Indirizzo KOL",
             2: "≥ 3 Acquisti da Indirizzi Smart Money in 1h",
             3: "Un Singolo Indirizzo ha Acquistato >10K"
-        },
-        "pt": {
+            },
+            "pt": {
             1: "Compra por Endereço de KOL",
             2: "≥ 3 Compras por Endereços de Smart Money em 1h",
             3: "Endereço Único Comprou >10K"
@@ -1720,8 +1258,8 @@ def format_premium_message(data: Dict, language: str = "zh") -> str:
 
     # 市值等級
     market_cap_level = data.get('market_cap_level', 1)
-    market_cap_levels = {1: "100K", 2: "300K", 3: "500K"}
-    market_cap_text = market_cap_levels.get(market_cap_level, "100K")
+    market_cap_levels = {1: "1M", 2: "2M", 3: "3M"}
+    market_cap_text = market_cap_levels.get(market_cap_level, "1M")
     
     # 預警次數
     alert_numbers = {
@@ -1777,6 +1315,86 @@ def format_premium_message(data: Dict, language: str = "zh") -> str:
     else:
         launch_time_display = '--'
 
+    # 解析合約安全資訊
+    try:
+        contract_security = json.loads(data.get('contract_security', '{}'))
+    except json.JSONDecodeError:
+        contract_security = {}
+
+    # 安全項目格式化 - 使用多語言支援
+    lang_texts = {
+        'zh': { 'burned_pool': '已燒池子', 'not_burned_pool': '未燒池子', 'not_honeypot': '非貔貅', 'is_honeypot': '是貔貅', 'authority_renounced': '已丟棄權限', 'authority_not_renounced': '未丟棄權限' },
+        'ch': { 'burned_pool': '已燒池子', 'not_burned_pool': '未燒池子', 'not_honeypot': '非貔貅', 'is_honeypot': '是貔貅', 'authority_renounced': '已丟棄權限', 'authority_not_renounced': '未丟棄權限' },
+        'en': { 'burned_pool': 'Pool Burned', 'not_burned_pool': 'Pool Not Burned', 'not_honeypot': 'Not Honeypot', 'is_honeypot': 'Honeypot', 'authority_renounced': 'Renounced', 'authority_not_renounced': 'Mutable' },
+        'ko': { 'burned_pool': '풀 소각됨', 'not_burned_pool': '풀 미소각', 'not_honeypot': '허니팟 아님', 'is_honeypot': '허니팟', 'authority_renounced': '권한 포기됨', 'authority_not_renounced': '권한 유지' },
+        'ja': { 'burned_pool': 'プール焼却済', 'not_burned_pool': 'プール未焼却', 'not_honeypot': 'ハニーポットではない', 'is_honeypot': 'ハニーポット', 'authority_renounced': '권限放棄済', 'authority_not_renounced': '권限未放棄' },
+        'ru': { 'burned_pool': 'Пул сожжен', 'not_burned_pool': 'Пул не сожжен', 'not_honeypot': 'Не ханипот', 'is_honeypot': 'Ханипот', 'authority_renounced': 'Права отозваны', 'authority_not_renounced': 'Права не отозваны' },
+        'id': { 'burned_pool': 'Pool Dibakar', 'not_burned_pool': 'Pool Tidak Dibakar', 'not_honeypot': 'Bukan Honeypot', 'is_honeypot': 'Honeypot', 'authority_renounced': 'Dilepas', 'authority_not_renounced': 'Dapat Diubah' },
+        'pt': { 'burned_pool': 'Pool Queimado', 'not_burned_pool': 'Pool Não Queimado', 'not_honeypot': 'Não Honeypot', 'is_honeypot': 'Honeypot', 'authority_renounced': 'Renunciado', 'authority_not_renounced': 'Mutável' },
+        'fr': { 'burned_pool': 'Pool Brûlé', 'not_burned_pool': 'Pool Non Brûlé', 'not_honeypot': 'Pas Honeypot', 'is_honeypot': 'Honeypot', 'authority_renounced': 'Renoncé', 'authority_not_renounced': 'Modifiable' },
+        'es': { 'burned_pool': 'Pool Quemado', 'not_burned_pool': 'Pool No Quemado', 'not_honeypot': 'No Honeypot', 'is_honeypot': 'Honeypot', 'authority_renounced': 'Renunciado', 'authority_not_renounced': 'Mutable' },
+        'tr': { 'burned_pool': 'Havuz Yakıldı', 'not_burned_pool': 'Havuz Yakılmadı', 'not_honeypot': 'Honeypot Değil', 'is_honeypot': 'Honeypot', 'authority_renounced': 'Vazgeçildi', 'authority_not_renounced': 'Değiştirilebilir' },
+        'de': { 'burned_pool': 'Pool Verbrannt', 'not_burned_pool': 'Pool Nicht Verbrannt', 'not_honeypot': 'Kein Honeypot', 'is_honeypot': 'Honeypot', 'authority_renounced': 'Verzichtet', 'authority_not_renounced': 'Veränderbar' },
+        'it': { 'burned_pool': 'Pool Bruciato', 'not_burned_pool': 'Pool Non Bruciato', 'not_honeypot': 'Non Honeypot', 'is_honeypot': 'Honeypot', 'authority_renounced': 'Rinunciato', 'authority_not_renounced': 'Mutabile' },
+        'ar': { 'burned_pool': 'تم حرق المجمع', 'not_burned_pool': 'لم يتم حرق المجمع', 'not_honeypot': 'ليس مصيدة عسل', 'is_honeypot': 'مصيدة عسل', 'authority_renounced': 'تم التنازل', 'authority_not_renounced': 'قابل للتغيير' },
+        'fa': { 'burned_pool': 'استخر سوزانده شده', 'not_burned_pool': 'استخر سوزانده نشده', 'not_honeypot': 'هانی پات نیست', 'is_honeypot': 'هانی پات', 'authority_renounced': 'صرف نظر شده', 'authority_not_renounced': 'قابل تغییر' },
+        'vn': { 'burned_pool': 'Pool Đã Đốt', 'not_burned_pool': 'Pool Chưa Đốt', 'not_honeypot': 'Không Phải Honeypot', 'is_honeypot': 'Honeypot', 'authority_renounced': 'Đã Từ Bỏ', 'authority_not_renounced': 'Có Thể Thay Đổi' },
+    }
+    
+    current_lang_texts = lang_texts.get(language, lang_texts['en'])
+
+    safety_checks = []
+    
+    # 只添加有檢測結果的項目
+    if contract_security.get('burn_pool') is not None:
+        is_burned = contract_security.get('burn_pool', False)
+        text = current_lang_texts['burned_pool'] if is_burned else current_lang_texts['not_burned_pool']
+        emoji = "🟢" if is_burned else "🔴"
+        safety_checks.append(f"{emoji} {text}")
+    
+    if contract_security.get('authority') is not None:
+        is_renounced = contract_security.get('authority', False)
+        text = current_lang_texts['authority_renounced'] if is_renounced else current_lang_texts['authority_not_renounced']
+        emoji = "🟢" if is_renounced else "🔴"
+        safety_checks.append(f"{emoji} {text}")
+    
+    if data.get('top10_holding') is not None and data.get('top10_holding_display') != '--':
+        try:
+            top10 = float(data['top10_holding'])
+            is_low_holding = top10 <= 30
+            emoji = "🟢" if is_low_holding else "🔴"
+            safety_checks.append(f"{emoji} Top10 {data.get('top10_holding_display', '--')}%")
+        except (ValueError, TypeError, KeyError):
+            pass
+    
+    if contract_security.get('rug_pull') is not None:
+        is_not_honeypot = contract_security.get('rug_pull', False)
+        text = current_lang_texts['not_honeypot'] if is_not_honeypot else current_lang_texts['is_honeypot']
+        emoji = "🟢" if is_not_honeypot else "🔴"
+        safety_checks.append(f"{emoji} {text}")
+
+    # 多語言安全檢測標題
+    security_titles = {
+        "zh": "🔍 代幣檢測：", "ch": "🔍 代幣檢測：", "en": "🔍 Token Audit: ", "ko": "🔍 토큰 감사: ",
+        "ja": "🔍 トークン監査：", "ru": "🔍 Аудит токена: ", "id": "🔍 Audit Token: ",
+        "pt": "🔍 Auditoria de Token: ", "fr": "🔍 Audit de Token : ", "es": "🔍 Auditoría de Token: ",
+        "tr": "🔍 Token Denetimi: ", "de": "🔍 Token-Prüfung: ", "it": "🔍 Controllo Token: ",
+        "ar": "🔍 تدقيق الرمز: ", "fa": "🔍 ممیزی نشانه: ", "vn": "🔍 Kiểm tra Token: "
+    }
+    
+    no_data_texts = {
+        "zh": "暫無檢測數據", "ch": "暫無檢測數據", "en": "No audit data", "ko": "감사 데이터 없음",
+        "ja": "監査データなし", "ru": "Нет данных аудита", "id": "Tidak ada data audit",
+        "pt": "Sem dados de auditoria", "fr": "Aucune donnée d'audit", "es": "Sin datos de auditoría",
+        "tr": "Denetim verisi yok", "de": "Keine Prüfdaten", "it": "Nessun dato di controllo",
+        "ar": "لا توجد بيانات تدقيق", "fa": "داده‌ای ممیزی وجود ندارد", "vn": "Không có dữ liệu kiểm tra"
+    }
+    
+    security_title = security_titles.get(language, security_titles["en"])
+    no_data_text = no_data_texts.get(language, no_data_texts["en"])
+    
+    safety_line = f"{security_title}\n" + " | ".join(safety_checks) if safety_checks else f"{security_title}{no_data_text}"
+
     # 組裝訊息
     message_parts = [
         template["title"],
@@ -1784,13 +1402,7 @@ def format_premium_message(data: Dict, language: str = "zh") -> str:
         template["price"].format(data.get('price_display', '--')),
         template["contract"].format(contract_display),
         template["launch_time"].format(launch_time_display),
-        template["token_check"].format(
-            '✅' if data.get('burn_pool', False) else '❌',
-            '✅' if data.get('authority', False) else '❌',
-            data.get('top10_holding_display', '--'),
-            '✅' if data.get('top10_holding', 0) else '❌',
-            '✅' if data.get('honeypot', False) else '❌'
-        ),
+        safety_line,
         template["links"].format(moonx_kline_link, x_search_link),
         highlight_line,
         "", # Blank line before alert

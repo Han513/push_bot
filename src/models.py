@@ -34,7 +34,7 @@ def get_utc8_time():
 
 class PushHistory(Base):
     __tablename__ = 'push_history'
-    __table_args__ = {'schema': 'tg_smartmoney'}
+    __table_args__ = {'schema': 'dex_query_v1'}
 
     id = Column(Integer, primary_key=True, comment='ID')
     message_content = Column(Text, nullable=False, comment='推送消息內容')
@@ -49,7 +49,7 @@ class PushHistory(Base):
 
 class CryptoInfo(Base):
     __tablename__ = 'crypto_info'
-    __table_args__ = {'schema': 'tg_smartmoney'}
+    __table_args__ = {'schema': 'dex_query_v1'}
 
     id = Column(Integer, primary_key=True, comment='ID')
     token_name = Column(String(255), nullable=False, comment='代幣名稱')
@@ -74,7 +74,7 @@ class CryptoInfo(Base):
     
 class Wallet(Base):
     __tablename__ = 'wallet'
-    __table_args__ = {'schema': 'solana'}
+    __table_args__ = {'schema': 'dex_query_v1'}
 
     id = Column(Integer, primary_key=True, comment='ID')
     address = Column(String(100), nullable=False, unique=True, comment='錢包地址')
@@ -147,6 +147,7 @@ async def create_tables():
 async def add_crypto_info(session, crypto_data: Dict) -> Optional[int]:
     """將加密貨幣資訊添加到資料庫並返回 ID"""
     try:
+        await session.execute(text("SET search_path TO dex_query_v1;"))
         # 處理 launch_time
         launch_time = crypto_data.get("launch_time")
         if isinstance(launch_time, str):
@@ -203,7 +204,7 @@ async def add_push_history(session, message_content: str, chat_ids: str, crypto_
 async def refresh_wallets_cache():
     """從資料庫查詢KOL、一般聰明錢、高淨值聰明錢，並更新快取"""
     async with await get_session() as session:
-        # 查KOL
+        await session.execute(text("SET search_path TO dex_query_v1;"))
         result = await session.execute(
             select(Wallet.address).where(Wallet.tag == 'kol')
         )

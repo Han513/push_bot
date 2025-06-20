@@ -9,13 +9,19 @@ from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, Bot
 from telegram.ext import Application, CommandHandler, ContextTypes, Defaults
 from telegram.error import NetworkError, TimedOut, RetryAfter
-from templates import format_message, load_templates
+from templates import format_message, load_templates, format_premium_message
 
 # 導入自定義模型和數據庫函數
 import models
+from utils import get_additional_channels
 
 # 載入環境變數
 load_dotenv(override=True)
+
+# 從環境變量加載語言群組配置
+LANGUAGE_GROUPS = json.loads(os.getenv("LANGUAGE_GROUPS", "{}"))
+if not LANGUAGE_GROUPS:
+    logger.warning("未設置 LANGUAGE_GROUPS 環境變數，將使用默認配置")
 
 # 設置日誌
 logging.basicConfig(
@@ -75,7 +81,7 @@ def init_bot():
         # 註冊命令處理器
         bot_app.add_handler(CommandHandler("start", start))
         bot_app.add_handler(CommandHandler("help", help_command))
-        bot_app.add_handler(CommandHandler("push", push))
+        # bot_app.add_handler(CommandHandler("push", push))
         bot_app.add_handler(CommandHandler("test_multilang", test_multilang))
         # 註冊錯誤處理器
         bot_app.add_error_handler(error_handler)
@@ -244,26 +250,17 @@ async def push_to_channel(context: ContextTypes.DEFAULT_TYPE, message: str, cryp
             await session.close()
 
 async def push_to_all_language_channels(context: ContextTypes.DEFAULT_TYPE, crypto_data: Dict, session=None, is_low_frequency: bool = False) -> Dict[str, bool]:
-    """同時向所有語言主題推送加密貨幣資訊，支持高频和低频信号"""
+    """同時向所有語言主題推送加密貨幣資訊，支持高频和低频信号，並推送到額外頻道（僅一次，中文模板）"""
     results = {}
-    
-    # 從環境變數加載語言群組配置
     language_groups = json.loads(os.getenv("LANGUAGE_GROUPS", "{}"))
-    
-    if not language_groups:
-        message = format_message(crypto_data)
-        result = await push_to_channel(context, message, crypto_data.get("id"), session, language="zh")
-        return {"default": result}
-    
     should_close_session = False
     if session is None:
         session = await models.get_session()
         should_close_session = True
-    
     try:
         original_group_id = os.getenv("GROUP_ID")
         original_topic_id = os.getenv("TOPIC_ID")
-        
+        # 1. 多語言主題推送
         for language, target in language_groups.items():
             try:
                 if is_low_frequency:
@@ -272,54 +269,61 @@ async def push_to_all_language_channels(context: ContextTypes.DEFAULT_TYPE, cryp
                 else:
                     group_id = target.get("high_freq_group_id") or target.get("group_id")
                     topic_id = target.get("high_freq_topic_id") or target.get("topic_id")
-                
                 if group_id:
                     os.environ["GROUP_ID"] = group_id
                 if topic_id:
                     os.environ["TOPIC_ID"] = topic_id
-                
-                if is_low_frequency:
-                    from templates import format_premium_message
-                    message = format_premium_message(crypto_data, language)
-                else:
-                    from templates import format_message
-                    message = format_message(crypto_data, language)
-                
+                message = format_premium_message(crypto_data, language) if is_low_frequency else format_message(crypto_data, language)
                 success = await push_to_channel(
-                    context, 
-                    message, 
-                    crypto_data.get("id"), 
+                    context,
+                    message,
+                    crypto_data.get("id"),
                     session,
                     language=language
                 )
-                
                 results[language] = success
                 logger.info(f"向 {language} 主題推送{'低频' if is_low_frequency else '高频'}信號: {'成功' if success else '失敗'}")
-                
             except Exception as e:
                 logger.error(f"向 {language} 主題推送{'低频' if is_low_frequency else '高频'}信號時發生錯誤: {e}")
                 results[language] = False
-        
+        # 2. 額外頻道推送（只推送一次，中文模板）
+        additional_channels = await get_additional_channels()
+        extra_type = "low_freq" if is_low_frequency else "high_freq"
+        extra_channels = additional_channels.get(extra_type, [])
+        if extra_channels:
+            message = format_premium_message(crypto_data, "zh") if is_low_frequency else format_message(crypto_data, "zh")
+            for channel in extra_channels:
+                try:
+                    if isinstance(channel, dict):
+                        os.environ["GROUP_ID"] = channel["group_id"]
+                        os.environ["TOPIC_ID"] = channel["topic_id"]
+                        channel_id = f"{channel['group_id']}_{channel['topic_id']}"
+                    else:
+                        channel_id = str(channel)
+                        os.environ["GROUP_ID"] = channel_id
+                        if "TOPIC_ID" in os.environ:
+                            del os.environ["TOPIC_ID"]
+                    success = await push_to_channel(context, message, crypto_data.get("id"), session, language="zh")
+                    results[f"extra_{channel_id}"] = success
+                    logger.info(f"向額外頻道 {channel_id} 推送{'低频' if is_low_frequency else '高频'}信號: {'成功' if success else '失敗'}")
+                except Exception as e:
+                    logger.error(f"向額外頻道 {channel_id} 推送時發生錯誤: {e}")
+                    results[f"extra_{channel_id}"] = False
         # 恢復原始環境變數
         if original_group_id:
             os.environ["GROUP_ID"] = original_group_id
         else:
             if "GROUP_ID" in os.environ:
                 del os.environ["GROUP_ID"]
-        
         if original_topic_id:
             os.environ["TOPIC_ID"] = original_topic_id
         else:
             if "TOPIC_ID" in os.environ:
                 del os.environ["TOPIC_ID"]
-            
         await session.commit()
-        
-        # 日誌輸出總結
         success_count = sum(1 for success in results.values() if success)
         total_count = len(results)
-        logger.info(f"多語言推送完成: 成功 {success_count}/{total_count}")
-        
+        logger.info(f"多語言+額外頻道推送完成: 成功 {success_count}/{total_count}")
         return results
     except Exception as e:
         logger.error(f"多語言推送過程中發生錯誤: {e}")
@@ -330,49 +334,49 @@ async def push_to_all_language_channels(context: ContextTypes.DEFAULT_TYPE, cryp
             await session.close()
 
 # Bot 命令處理函數
-async def push(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """手動觸發推送加密貨幣信息到所有語言主題的命令"""
-    await update.message.reply_text("正在獲取加密貨幣數據並推送到所有語言主題...")
+# async def push(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+#     """手動觸發推送加密貨幣信息到所有語言主題的命令"""
+#     await update.message.reply_text("正在獲取加密貨幣數據並推送到所有語言主題...")
 
-    try:
-        # 獲取加密貨幣數據
-        data = fetch_crypto_data()
+#     try:
+#         # 獲取加密貨幣數據
+#         data = fetch_crypto_data()
 
-        # 創建會話
-        session = await models.get_session()
-        try:
-            # 儲存加密貨幣資訊
-            crypto_id = await models.add_crypto_info(session, data)
-            if crypto_id is None:
-                await update.message.reply_text("❌ 無法儲存加密貨幣資訊，推送中止。")
-                return
+#         # 創建會話
+#         session = await models.get_session()
+#         try:
+#             # 儲存加密貨幣資訊
+#             crypto_id = await models.add_crypto_info(session, data)
+#             if crypto_id is None:
+#                 await update.message.reply_text("❌ 無法儲存加密貨幣資訊，推送中止。")
+#                 return
 
-            # 設置 ID 用於多語言推送
-            data["id"] = crypto_id
+#             # 設置 ID 用於多語言推送
+#             data["id"] = crypto_id
 
-            # 推送到所有語言主題
-            results = await push_to_all_language_channels(context, data, session)
+#             # 推送到所有語言主題
+#             results = await push_to_all_language_channels(context, data, session)
 
-            # 檢查結果
-            if "error" in results:
-                await update.message.reply_text(f"❌ 推送過程中發生錯誤: {results['error']}")
-            else:
-                success_count = sum(1 for success in results.values() if success)
-                total_count = len(results)
-                if success_count == total_count:
-                    await update.message.reply_text(f"✅ 成功推送到所有 {total_count} 個語言主題！")
-                else:
-                    await update.message.reply_text(f"⚠️ 部分推送失敗: 成功 {success_count}/{total_count} 個語言主題。請檢查日誌。")
+#             # 檢查結果
+#             if "error" in results:
+#                 await update.message.reply_text(f"❌ 推送過程中發生錯誤: {results['error']}")
+#             else:
+#                 success_count = sum(1 for success in results.values() if success)
+#                 total_count = len(results)
+#                 if success_count == total_count:
+#                     await update.message.reply_text(f"✅ 成功推送到所有 {total_count} 個語言主題！")
+#                 else:
+#                     await update.message.reply_text(f"⚠️ 部分推送失敗: 成功 {success_count}/{total_count} 個語言主題。請檢查日誌。")
 
-        except Exception as e:
-            logger.error(f"數據庫操作錯誤: {e}")
-            await session.rollback()
-            await update.message.reply_text(f"❌ 推送失敗: {str(e)}")
-        finally:
-            await session.close()
-    except Exception as e:
-        logger.error(f"推送命令處理錯誤: {e}")
-        await update.message.reply_text(f"❌ 推送失敗: {str(e)}")
+#         except Exception as e:
+#             logger.error(f"數據庫操作錯誤: {e}")
+#             await session.rollback()
+#             await update.message.reply_text(f"❌ 推送失敗: {str(e)}")
+#         finally:
+#             await session.close()
+#     except Exception as e:
+#         logger.error(f"推送命令處理錯誤: {e}")
+#         await update.message.reply_text(f"❌ 推送失敗: {str(e)}")
 
 async def test_multilang(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """測試多語言推送"""
@@ -426,7 +430,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """處理 /start 命令"""
     await update.message.reply_text(
         "👋 歡迎使用 MOONX 加密貨幣資訊機器人！\n\n"
-        "🔹 使用 /push 命令可以推送最新的加密貨幣資訊到公告頻道\n\n"
+        # "🔹 使用 /push 命令可以推送最新的加密貨幣資訊到公告頻道\n\n"
         "有任何問題或建議，請聯繫管理員。"
     )
 
@@ -436,7 +440,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "📚 MOONX 機器人指令說明：\n\n"
         "/start - 查看歡迎訊息\n"
         "/help - 顯示此幫助訊息\n"
-        "/push - 推送最新加密貨幣資訊到公告頻道\n\n"
+        # "/push - 推送最新加密貨幣資訊到公告頻道\n\n"
         "⚠️ 注意：推送功能僅限授權用戶使用。"
     )
 
