@@ -1166,11 +1166,11 @@ def format_message(data: Dict, language: str = "zh") -> str:
     message = "\n".join(message_parts)
     return message
 
-def format_premium_message(data: Dict, language: str = "zh") -> str:
+def format_premium_message(data: Dict, language: str = "en") -> str:
     templates = load_templates()
     premium_templates = templates.get("premium", {})
     if language not in premium_templates:
-        language = "zh"
+        language = "en"
     template = premium_templates[language]
 
     # 多語言亮點標籤映射

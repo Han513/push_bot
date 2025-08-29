@@ -17,6 +17,7 @@ from utils import get_additional_channels
 
 # 載入環境變數
 load_dotenv(override=True)
+logger = logging.getLogger(__name__)
 
 # 從環境變量加載語言群組配置
 LANGUAGE_GROUPS = json.loads(os.getenv("LANGUAGE_GROUPS", "{}"))
@@ -291,7 +292,7 @@ async def push_to_all_language_channels(context: ContextTypes.DEFAULT_TYPE, cryp
         extra_type = "low_freq" if is_low_frequency else "high_freq"
         extra_channels = additional_channels.get(extra_type, [])
         if extra_channels:
-            message = format_premium_message(crypto_data, "zh") if is_low_frequency else format_message(crypto_data, "zh")
+            message = format_premium_message(crypto_data, "en") if is_low_frequency else format_message(crypto_data, "en")
             for channel in extra_channels:
                 try:
                     if isinstance(channel, dict):
@@ -303,7 +304,7 @@ async def push_to_all_language_channels(context: ContextTypes.DEFAULT_TYPE, cryp
                         os.environ["GROUP_ID"] = channel_id
                         if "TOPIC_ID" in os.environ:
                             del os.environ["TOPIC_ID"]
-                    success = await push_to_channel(context, message, crypto_data.get("id"), session, language="zh")
+                    success = await push_to_channel(context, message, crypto_data.get("id"), session, language="en")
                     results[f"extra_{channel_id}"] = success
                     logger.info(f"向額外頻道 {channel_id} 推送{'低频' if is_low_frequency else '高频'}信號: {'成功' if success else '失敗'}")
                 except Exception as e:
@@ -429,9 +430,8 @@ async def test_multilang(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """處理 /start 命令"""
     await update.message.reply_text(
-        "👋 歡迎使用 MOONX 加密貨幣資訊機器人！\n\n"
-        # "🔹 使用 /push 命令可以推送最新的加密貨幣資訊到公告頻道\n\n"
-        "有任何問題或建議，請聯繫管理員。"
+        "👋 Welcome to MoonX Crypto Bots!\n\n"
+        "🔹 Questions or feedback? Reach out to the admin."
     )
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

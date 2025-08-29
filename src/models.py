@@ -77,7 +77,7 @@ class Wallet(Base):
     __table_args__ = {'schema': 'dex_query_v1'}
 
     id = Column(Integer, primary_key=True, comment='ID')
-    address = Column(String(100), nullable=False, unique=True, comment='錢包地址')
+    wallet_address = Column(String(100), nullable=False, unique=True, comment='錢包地址')
     balance = Column(Float, nullable=True, comment='錢包餘額')
     balance_USD = Column(Float, nullable=True, comment='錢包餘額 (USD)')
     chain = Column(String(50), nullable=False, comment='區塊鏈類型')
@@ -206,12 +206,12 @@ async def refresh_wallets_cache():
     async with await get_session() as session:
         await session.execute(text("SET search_path TO dex_query_v1;"))
         result = await session.execute(
-            select(Wallet.address).where(Wallet.tag == 'kol')
+            select(Wallet.wallet_address).where(Wallet.tag == 'kol')
         )
         kol_wallets = set(row[0] for row in result.fetchall())
         # 查所有聰明錢
         result = await session.execute(
-            select(Wallet.address, Wallet.win_rate_30d).where(Wallet.is_smart_wallet == True)
+            select(Wallet.wallet_address, Wallet.win_rate_30d).where(Wallet.is_smart_wallet == True)
         )
         smart_wallets = {row[0]: row[1] for row in result.fetchall()}
         # 高淨值聰明錢
@@ -221,7 +221,7 @@ async def refresh_wallets_cache():
     _wallets_cache["kol_wallets"] = kol_wallets
     _wallets_cache["smart_wallets"] = set(smart_wallets.keys())
     _wallets_cache["high_value_smart_wallets"] = high_value_smart_wallets
-    _wallets_cache["smart_wallets_win_rate"] = smart_wallets  # address: win_rate
+    _wallets_cache["smart_wallets_win_rate"] = smart_wallets
     _wallets_cache["last_update"] = datetime.now()
 
 async def get_cached_wallets(force_refresh=False):
