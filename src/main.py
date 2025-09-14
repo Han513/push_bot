@@ -10,6 +10,8 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, Bot
 from telegram.ext import Application, CommandHandler, ContextTypes, Defaults
 from telegram.error import NetworkError, TimedOut, RetryAfter
 from templates import format_message, load_templates, format_premium_message
+from high_freq_consumer import start_kafka_consumer
+from heat_scheduler import start_scheduler, stop_scheduler
 
 # 導入自定義模型和數據庫函數
 import models
@@ -60,10 +62,10 @@ if not DATABASE_URI or not BOT_TOKEN:
 if not GROUP_ID or not TOPIC_ID:
     logger.warning("未設置 GROUP_ID 或 TOPIC_ID 環境變數，主題推送可能無法正常工作")
 
-logger.info(f"DATABASE_URI_TELEGRAM: {DATABASE_URI}")
-logger.info(f"GROUP_ID: {GROUP_ID}, TOPIC_ID: {TOPIC_ID}")
-logger.info(f"DATABASE_URI_TELEGRAM: {DATABASE_URI}")
-logger.info(f"ANNOUNCEMENT_CHANNEL_ID: {CHANNEL_ID}")
+# logger.info(f"DATABASE_URI_TELEGRAM: {DATABASE_URI}")
+# logger.info(f"GROUP_ID: {GROUP_ID}, TOPIC_ID: {TOPIC_ID}")
+# logger.info(f"DATABASE_URI_TELEGRAM: {DATABASE_URI}")
+# logger.info(f"ANNOUNCEMENT_CHANNEL_ID: {CHANNEL_ID}")
 
 # 全局 bot 應用實例
 bot_app = None
@@ -122,7 +124,16 @@ def fetch_crypto_data() -> Dict:
     }
     return data
 
-async def push_to_channel(context: ContextTypes.DEFAULT_TYPE, message: str, crypto_id: Optional[int] = None, session=None, language: str = "zh") -> bool:
+async def push_to_channel(
+    context: ContextTypes.DEFAULT_TYPE,
+    message: str,
+    crypto_id: Optional[int] = None,
+    session=None,
+    language: str = "en",
+    target_chat_id: Optional[str] = None,
+    target_group_id: Optional[str] = None,
+    target_topic_id: Optional[str] = None,
+) -> bool:
     """推送消息到指定頻道或主題，带有重试机制"""
     should_close_session = False
     if session is None:
@@ -130,24 +141,31 @@ async def push_to_channel(context: ContextTypes.DEFAULT_TYPE, message: str, cryp
         should_close_session = True
 
     try:
-        # 檢查是否有主題設置
-        GROUP_RAW_ID = os.getenv("GROUP_ID")
-        TOPIC_ID = os.getenv("TOPIC_ID")
-        USE_TOPIC = GROUP_RAW_ID and TOPIC_ID
-        
-        # 決定使用哪種模式
-        if USE_TOPIC:
-            # 添加 -100 前綴，除非已經有前綴
-            if GROUP_RAW_ID.startswith("-100"):
-                target_chat_id = GROUP_RAW_ID
-            else:
-                target_chat_id = f"-100{GROUP_RAW_ID}"
-            logger.info(f"使用主題模式，目標群組 ID: {target_chat_id}, 主題 ID: {TOPIC_ID}")
+        # 解析目標對象（優先使用顯式參數，其次環境變數，最後默認頻道）
+        USE_TOPIC = False
+        resolved_chat_id = None
+        resolved_topic_id = None
+
+        if target_chat_id:
+            resolved_chat_id = target_chat_id
+            USE_TOPIC = False
         else:
-            target_chat_id = CHANNEL_ID
-            logger.info(f"使用頻道模式，目標頻道 ID: {target_chat_id}")
+            # 允許傳入 group+topic 的顯式目標
+            group_raw_id = target_group_id or os.getenv("GROUP_ID")
+            topic_id = target_topic_id or os.getenv("TOPIC_ID")
+            USE_TOPIC = bool(group_raw_id and topic_id)
+            if USE_TOPIC:
+                if str(group_raw_id).startswith("-100"):
+                    resolved_chat_id = str(group_raw_id)
+                else:
+                    resolved_chat_id = f"-100{group_raw_id}"
+                resolved_topic_id = str(topic_id)
+                logger.info(f"使用主題模式，目標群組 ID: {resolved_chat_id}, 主題 ID: {resolved_topic_id}")
+            else:
+                resolved_chat_id = CHANNEL_ID
+                logger.info(f"使用頻道模式，目標頻道 ID: {resolved_chat_id}")
         
-        if not target_chat_id:
+        if not resolved_chat_id:
             logger.error("未設置頻道 ID 或群組 ID，無法推送消息")
             return False
 
@@ -166,7 +184,7 @@ async def push_to_channel(context: ContextTypes.DEFAULT_TYPE, message: str, cryp
 
         # 根據語言獲取按鈕文本
         templates = load_templates()
-        lang_templates = templates.get(language, templates.get("zh"))
+        lang_templates = templates.get(language, templates.get("en"))
         trade_button_text = lang_templates.get("trade_button", "⚡️一键交易⬆️")
         chart_button_text = lang_templates.get("chart_button", "👉查K线⬆️")
 
@@ -191,7 +209,7 @@ async def push_to_channel(context: ContextTypes.DEFAULT_TYPE, message: str, cryp
 
                 # 準備發送參數
                 message_params = {
-                    'chat_id': target_chat_id,
+                    'chat_id': resolved_chat_id,
                     'text': message,
                     'reply_markup': reply_markup,
                     'parse_mode': 'HTML'
@@ -199,20 +217,21 @@ async def push_to_channel(context: ContextTypes.DEFAULT_TYPE, message: str, cryp
                 
                 # 如果使用主題模式，添加主題 ID
                 if USE_TOPIC:
-                    message_params['message_thread_id'] = int(TOPIC_ID)
+                    message_params['message_thread_id'] = int(resolved_topic_id)
                 
                 # 發送消息
                 await bot.send_message(**message_params)
 
-                log_message = f"消息已發送到{'主題 ' + TOPIC_ID + ' 在群組 ' + target_chat_id if USE_TOPIC else '頻道 ' + target_chat_id}"
-                logger.info(log_message)
+                log_message = f"消息已發送到{'主題 ' + resolved_topic_id + ' 在群組 ' + resolved_chat_id if USE_TOPIC else '頻道 ' + resolved_chat_id}"
+                # logger.info(log_message)
                 success = True
                 break  # 成功發送，跳出重試循環
 
             except (NetworkError, TimedOut) as e:
                 # 網絡錯誤，等待一段時間後重試
                 error_message = f"網絡錯誤: {str(e)}"
-                logger.warning(f"第 {attempt+1} 次嘗試發送消息失敗: {error_message}，等待 {retry_delay} 秒後重試")
+                target_desc = f"主題 {resolved_topic_id} 在群組 {resolved_chat_id}" if USE_TOPIC else f"頻道 {resolved_chat_id}"
+                logger.warning(f"第 {attempt+1} 次嘗試發送消息失敗[{target_desc}]: {error_message}，等待 {retry_delay} 秒後重試")
                 await asyncio.sleep(retry_delay)
                 retry_delay *= 2  # 指數退避策略
 
@@ -220,13 +239,14 @@ async def push_to_channel(context: ContextTypes.DEFAULT_TYPE, message: str, cryp
                 # API 限流，等待指定的時間後重試
                 retry_after = e.retry_after
                 error_message = f"API 限流，需要等待 {retry_after} 秒"
-                logger.warning(f"第 {attempt+1} 次嘗試發送消息失敗: {error_message}")
+                target_desc = f"主題 {resolved_topic_id} 在群組 {resolved_chat_id}" if USE_TOPIC else f"頻道 {resolved_chat_id}"
+                logger.warning(f"第 {attempt+1} 次嘗試發送消息失敗[{target_desc}]: {error_message}")
                 await asyncio.sleep(retry_after)
 
             except Exception as e:
                 # 其他錯誤
                 error_message = str(e)
-                target_desc = f"{'主題 ' + TOPIC_ID + ' 在群組 ' + target_chat_id if USE_TOPIC else '頻道 ' + target_chat_id}"
+                target_desc = f"{'主題 ' + (resolved_topic_id or '') + ' 在群組 ' + resolved_chat_id if USE_TOPIC else '頻道 ' + resolved_chat_id}"
                 logger.error(f"無法發送消息到{target_desc}: {error_message}")
                 break  # 非預期錯誤，不重試
 
@@ -240,6 +260,7 @@ async def push_to_channel(context: ContextTypes.DEFAULT_TYPE, message: str, cryp
             status="success" if success else "failed",
             error_message=error_message
         )
+        # 立即提交，避免長事務
         await session.commit()
         return success
     except Exception as e:
@@ -248,136 +269,96 @@ async def push_to_channel(context: ContextTypes.DEFAULT_TYPE, message: str, cryp
         return False
     finally:
         if should_close_session:
-            await session.close()
+            try:
+                await session.close()
+            except Exception:
+                pass
 
 async def push_to_all_language_channels(context: ContextTypes.DEFAULT_TYPE, crypto_data: Dict, session=None, is_low_frequency: bool = False) -> Dict[str, bool]:
-    """同時向所有語言主題推送加密貨幣資訊，支持高频和低频信号，並推送到額外頻道（僅一次，中文模板）"""
-    results = {}
+    """並發向所有語言主題與額外頻道推送加密貨幣資訊。"""
+    results: Dict[str, bool] = {}
     language_groups = json.loads(os.getenv("LANGUAGE_GROUPS", "{}"))
-    should_close_session = False
-    if session is None:
-        session = await models.get_session()
-        should_close_session = True
-    try:
-        original_group_id = os.getenv("GROUP_ID")
-        original_topic_id = os.getenv("TOPIC_ID")
-        # 1. 多語言主題推送
-        for language, target in language_groups.items():
-            try:
-                if is_low_frequency:
-                    group_id = target.get("low_freq_group_id") or target.get("group_id")
-                    topic_id = target.get("low_freq_topic_id") or target.get("topic_id")
-                else:
-                    group_id = target.get("high_freq_group_id") or target.get("group_id")
-                    topic_id = target.get("high_freq_topic_id") or target.get("topic_id")
-                if group_id:
-                    os.environ["GROUP_ID"] = group_id
-                if topic_id:
-                    os.environ["TOPIC_ID"] = topic_id
-                message = format_premium_message(crypto_data, language) if is_low_frequency else format_message(crypto_data, language)
-                success = await push_to_channel(
+
+    # 構造併發任務
+    send_jobs = []  # (key, coroutine)
+
+    # 1) 多語言主題
+    for language, target in language_groups.items():
+        if is_low_frequency:
+            group_id = target.get("low_freq_group_id") or target.get("group_id")
+            topic_id = target.get("low_freq_topic_id") or target.get("topic_id")
+        else:
+            group_id = target.get("high_freq_group_id") or target.get("group_id")
+            topic_id = target.get("high_freq_topic_id") or target.get("topic_id")
+        if not group_id or not topic_id:
+            # 無有效目標，跳過
+            results[language] = False
+            continue
+        msg = format_premium_message(crypto_data, language) if is_low_frequency else format_message(crypto_data, language)
+        send_jobs.append((language, push_to_channel(
+            context,
+            msg,
+            crypto_data.get("id"),
+            session=None,  # 避免共享 session 併發問題
+            language=language,
+            target_group_id=group_id,
+            target_topic_id=topic_id,
+        )))
+
+    # 2) 額外頻道（API）
+    additional_channels = await get_additional_channels()
+    print(f"additional_channels: {additional_channels}")
+    extra_type = "low_freq" if is_low_frequency else "high_freq"
+    extra_channels = additional_channels.get(extra_type, [])
+    for channel in extra_channels:
+        try:
+            if isinstance(channel, dict):
+                group_id = channel.get("group_id")
+                topic_id = channel.get("topic_id")
+                lang = (channel.get("language") or "en").lower()
+                if group_id and topic_id:
+                    msg = format_premium_message(crypto_data, lang) if is_low_frequency else format_message(crypto_data, lang)
+                    key = f"extra_{group_id}_{topic_id}"
+                    send_jobs.append((key, push_to_channel(
+                        context,
+                        msg,
+                        crypto_data.get("id"),
+                        session=None,
+                        language=lang,
+                        target_group_id=group_id,
+                        target_topic_id=topic_id,
+                    )))
+            else:
+                # 非字典，視為直接 chat_id
+                chat_id = str(channel)
+                lang = "en"
+                msg = format_premium_message(crypto_data, lang) if is_low_frequency else format_message(crypto_data, lang)
+                key = f"extra_{chat_id}"
+                send_jobs.append((key, push_to_channel(
                     context,
-                    message,
+                    msg,
                     crypto_data.get("id"),
-                    session,
-                    language=language
-                )
-                results[language] = success
-                logger.info(f"向 {language} 主題推送{'低频' if is_low_frequency else '高频'}信號: {'成功' if success else '失敗'}")
-            except Exception as e:
-                logger.error(f"向 {language} 主題推送{'低频' if is_low_frequency else '高频'}信號時發生錯誤: {e}")
-                results[language] = False
-        # 2. 額外頻道推送（只推送一次，中文模板）
-        additional_channels = await get_additional_channels()
-        extra_type = "low_freq" if is_low_frequency else "high_freq"
-        extra_channels = additional_channels.get(extra_type, [])
-        if extra_channels:
-            message = format_premium_message(crypto_data, "en") if is_low_frequency else format_message(crypto_data, "en")
-            for channel in extra_channels:
-                try:
-                    if isinstance(channel, dict):
-                        os.environ["GROUP_ID"] = channel["group_id"]
-                        os.environ["TOPIC_ID"] = channel["topic_id"]
-                        channel_id = f"{channel['group_id']}_{channel['topic_id']}"
-                    else:
-                        channel_id = str(channel)
-                        os.environ["GROUP_ID"] = channel_id
-                        if "TOPIC_ID" in os.environ:
-                            del os.environ["TOPIC_ID"]
-                    success = await push_to_channel(context, message, crypto_data.get("id"), session, language="en")
-                    results[f"extra_{channel_id}"] = success
-                    logger.info(f"向額外頻道 {channel_id} 推送{'低频' if is_low_frequency else '高频'}信號: {'成功' if success else '失敗'}")
-                except Exception as e:
-                    logger.error(f"向額外頻道 {channel_id} 推送時發生錯誤: {e}")
-                    results[f"extra_{channel_id}"] = False
-        # 恢復原始環境變數
-        if original_group_id:
-            os.environ["GROUP_ID"] = original_group_id
-        else:
-            if "GROUP_ID" in os.environ:
-                del os.environ["GROUP_ID"]
-        if original_topic_id:
-            os.environ["TOPIC_ID"] = original_topic_id
-        else:
-            if "TOPIC_ID" in os.environ:
-                del os.environ["TOPIC_ID"]
-        await session.commit()
-        success_count = sum(1 for success in results.values() if success)
-        total_count = len(results)
-        logger.info(f"多語言+額外頻道推送完成: 成功 {success_count}/{total_count}")
-        return results
-    except Exception as e:
-        logger.error(f"多語言推送過程中發生錯誤: {e}")
-        await session.rollback()
-        return {"error": str(e)}
-    finally:
-        if should_close_session:
-            await session.close()
+                    session=None,
+                    language=lang,
+                    target_chat_id=chat_id,
+                )))
+        except Exception:
+            # 忽略單一構建錯誤
+            continue
 
-# Bot 命令處理函數
-# async def push(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-#     """手動觸發推送加密貨幣信息到所有語言主題的命令"""
-#     await update.message.reply_text("正在獲取加密貨幣數據並推送到所有語言主題...")
+    # 併發執行
+    if send_jobs:
+        keys = [k for k, _ in send_jobs]
+        coros = [c for _, c in send_jobs]
+        results_list = await asyncio.gather(*coros, return_exceptions=True)
+        for k, r in zip(keys, results_list):
+            results[k] = (False if isinstance(r, Exception) else bool(r))
 
-#     try:
-#         # 獲取加密貨幣數據
-#         data = fetch_crypto_data()
-
-#         # 創建會話
-#         session = await models.get_session()
-#         try:
-#             # 儲存加密貨幣資訊
-#             crypto_id = await models.add_crypto_info(session, data)
-#             if crypto_id is None:
-#                 await update.message.reply_text("❌ 無法儲存加密貨幣資訊，推送中止。")
-#                 return
-
-#             # 設置 ID 用於多語言推送
-#             data["id"] = crypto_id
-
-#             # 推送到所有語言主題
-#             results = await push_to_all_language_channels(context, data, session)
-
-#             # 檢查結果
-#             if "error" in results:
-#                 await update.message.reply_text(f"❌ 推送過程中發生錯誤: {results['error']}")
-#             else:
-#                 success_count = sum(1 for success in results.values() if success)
-#                 total_count = len(results)
-#                 if success_count == total_count:
-#                     await update.message.reply_text(f"✅ 成功推送到所有 {total_count} 個語言主題！")
-#                 else:
-#                     await update.message.reply_text(f"⚠️ 部分推送失敗: 成功 {success_count}/{total_count} 個語言主題。請檢查日誌。")
-
-#         except Exception as e:
-#             logger.error(f"數據庫操作錯誤: {e}")
-#             await session.rollback()
-#             await update.message.reply_text(f"❌ 推送失敗: {str(e)}")
-#         finally:
-#             await session.close()
-#     except Exception as e:
-#         logger.error(f"推送命令處理錯誤: {e}")
-#         await update.message.reply_text(f"❌ 推送失敗: {str(e)}")
+    # 總結
+    success_count = sum(1 for v in results.values() if v)
+    total_count = len(results)
+    logger.info(f"多語言+額外頻道推送完成(並發): 成功 {success_count}/{total_count}")
+    return results
 
 async def test_multilang(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """測試多語言推送"""
@@ -477,6 +458,12 @@ async def main():
         await bot_app.start()
         logger.info("Bot 啟動完成，開始輪詢...")
 
+        # 啟動熱度排程（背景任務）
+        try:
+            await start_scheduler()
+        except Exception as e:
+            logger.error(f"啟動熱度排程失敗: {e}")
+
         # 啟動輪詢並保持運行，設置更穩健的參數
         polling_options = {
             'drop_pending_updates': True,
@@ -486,6 +473,12 @@ async def main():
         # 啟動輪詢
         await bot_app.updater.start_polling(**polling_options)
         logger.info("Bot 輪詢已啟動")
+
+        # 啟動 Kafka 高頻消費任務
+        try:
+            await start_kafka_consumer()
+        except Exception as e:
+            logger.error(f"啟動 Kafka 高頻消費任務失敗: {e}")
 
         # 使用事件等待機制來保持運行
         stop_event = asyncio.Event()
@@ -499,6 +492,12 @@ async def main():
     finally:
         logger.info("正在停止 Bot...")
         try:
+            # 停止熱度排程
+            try:
+                await stop_scheduler()
+            except Exception as e:
+                logger.error(f"停止熱度排程時發生錯誤: {e}")
+
             if bot_app and hasattr(bot_app.updater, 'running') and bot_app.updater.running:
                 logger.info("正在停止輪詢...")
                 await bot_app.updater.stop()

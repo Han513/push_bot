@@ -36,9 +36,13 @@ SOCIALS_API_URL = os.getenv("SOCIALS_API_URL", "http://172.31.91.67:5002/admin/t
 app = Quart(__name__)
 app = cors(app, allow_origin="*")
 
-# 用于避免重複處理相同代幣的集合
+# 用于避免重複處理相同代幣的集合（普通推送去重：一段時間內同一地址只入隊一次）
 processed_tokens = set()
 processing_lock = asyncio.Lock()
+
+# Premium 推送的等級去重：記錄每個地址已推送的最高等級，只允許更高等級入隊
+premium_max_level = {}
+premium_lock = asyncio.Lock()
 
 # 存儲任務對象
 app_tasks = {}
@@ -155,10 +159,18 @@ async def token_processor():
                         # 創建會話
                         session = await get_session()
                         try:
-                            # 儲存加密貨幣資訊
+                            # 儲存加密貨幣資訊（flush 之後立即提交，避免長事務）
                             crypto_id = await add_crypto_info(session, crypto_data)
                             if crypto_id is None:
                                 logger.error(f"無法保存加密貨幣信息: {token_address}")
+                                continue
+
+                            # 立即提交並釋放事務，避免 idle in transaction
+                            try:
+                                await session.commit()
+                            except Exception as e:
+                                logger.error(f"提交加密貨幣信息時發生錯誤: {e}")
+                                await session.rollback()
                                 continue
 
                             # 設置 ID
@@ -175,10 +187,16 @@ async def token_processor():
                                     self.bot = None
 
                             # 統一使用 push_to_all_language_channels，根據任務類型設置 is_low_frequency
+                            # 插入完成後不再依賴當前資料庫會話，提早關閉以釋放連線
+                            try:
+                                await session.close()
+                            except Exception:
+                                pass
+
                             results = await push_to_all_language_channels(
                                 FakeContext(), 
                                 crypto_data, 
-                                session, 
+                                session=None, 
                                 is_low_frequency=is_low_frequency
                             )
 
@@ -197,7 +215,11 @@ async def token_processor():
                             logger.error(f"處理代幣 {token_address} 時發生錯誤: {e}")
                             await session.rollback()
                         finally:
-                            await session.close()
+                            # 若前面未能提前關閉，這裡作保險處理
+                            try:
+                                await session.close()
+                            except Exception:
+                                pass
                     except Exception as e:
                         logger.error(f"處理代幣任務時發生錯誤: {e}")
 
@@ -222,7 +244,11 @@ async def cleanup_processed_tokens():
                 token_count = len(processed_tokens)
                 processed_tokens.clear()
 
-            logger.info(f"已清理已處理代幣集合，清理前數量: {token_count}")
+            async with premium_lock:
+                premium_count = len(premium_max_level)
+                premium_max_level.clear()
+
+            logger.info(f"已清理去重集合，普通: {token_count}，premium: {premium_count}")
     except asyncio.CancelledError:
         logger.info("清理任務已取消")
         raise
@@ -287,170 +313,237 @@ async def check_token_exists(session: aiohttp.ClientSession, token_address: str)
 async def fetch_token_info(token_address: str) -> Optional[Dict]:
     """從 Solscan API 和內部 API 獲取代幣信息"""
     async with aiohttp.ClientSession() as session:
-        # 從內部 API 獲取數據
-        internal_url = f"{INTERNAL_API_URL}/internal/token_info"
-        params = {
-            "network": "SOLANA",
-            "tokenAddress": token_address,
-            "brand": "BYD"
+        # 從 ES 獲取數據（以 address + SOLANA 精準查詢）
+        es_base_url = os.getenv("ES_BASE_URL", "http://es-sg-2ci4eq22t0001gfig.elasticsearch.aliyuncs.com:9200")
+        es_index = os.getenv("ES_INDEX", "web3_tokens")
+        es_username = os.getenv("ES_USERNAME", "elastic")
+        es_password = os.getenv("ES_PASSWORD", "J4U#dh8Kd1Fz")
+
+        es_detail_url = f"{es_base_url.rstrip('/')}/{es_index}/_search"
+        es_payload = {
+            "query": {
+                "bool": {
+                    "must": [
+                        {"term": {"address": token_address}},
+                        {"term": {"network": "SOLANA"}},
+                    ]
+                }
+            },
+            "size": 1,
         }
-        
+
+        es_source = None
         try:
-            async with session.get(internal_url, params=params) as internal_response:
-                if internal_response.status != 200:
-                    logger.error(f"內部 API 請求失敗: {internal_response.status}")
-                    return None
-                
-                internal_data = await internal_response.json()
-                
-                # 如果返回的數據中沒有 data 字段，表示代幣不存在
-                if internal_data.get("code") == 200 and not internal_data.get("data"):
-                    logger.info(f"代幣不存在: {token_address}")
-                    return None
+            async with session.post(es_detail_url, json=es_payload, auth=aiohttp.BasicAuth(es_username, es_password)) as es_resp:
+                if es_resp.status != 200:
+                    logger.warning(f"ES 查詢失敗: HTTP {es_resp.status}，將嘗試 Solscan 補償")
+                else:
+                    es_json = await es_resp.json()
+                    hits = es_json.get("hits", {}).get("hits", [])
+                    if not hits:
+                        logger.info(f"ES 未找到代幣: {token_address}，將嘗試 Solscan 補償")
+                    else:
+                        es_source = hits[0].get("_source") or None
         except Exception as e:
-            logger.error(f"從內部 API 獲取數據時發生錯誤: {e}")
-            return None
+            logger.warning(f"查詢 ES 發生錯誤: {e}，將嘗試 Solscan 補償")
 
-        # 從 Solscan API 獲取基本信息
-        url = f"https://pro-api.solscan.io/v2.0/token/meta?address={token_address}"
-        headers = {"token": SOLSCAN_API_TOKEN}
+        # ES 優先，Solscan 作為備援
+        has_twitter = False
+        has_website = False
+        twitter_url = None
+        website_url = None
+        dev_wallet_balance = 0.0
 
-        async with session.get(url, headers=headers) as response:
-            if response.status != 200:
-                logger.error(f"從 Solscan API 獲取數據失敗: {response.status}")
-                return None
+        # 風險/Top10/DEV 狀態等（先設預設值）
+        risk_items = {}
+        top10_holding = None
+        top10_holding_display = "--"
+        dev_status = None
+        dev_status_display = "--"
 
-            solscan_data = await response.json()
+        # 從 ES 取名/符號
+        token_name = (es_source or {}).get("name", "Unknown")
+        token_symbol = (es_source or {}).get("symbol", "Unknown")
 
-            if not solscan_data.get("success") or "data" not in solscan_data:
-                logger.error("Solscan API 返回無效數據")
-                return None
+        # 時間：優先 ES created_at(毫秒)
+        created_time = None
+        if es_source:
+            try:
+                created_time = int(int(es_source.get("created_at") or 0) / 1000)
+            except Exception:
+                created_time = None
+        if created_time:
+            dt = datetime.fromtimestamp(created_time, tz=timezone.utc)
+            dt_utc8 = dt.astimezone(timezone(timedelta(hours=8)))
+            formatted_time = dt_utc8.strftime("%Y.%m.%d %H:%M:%S")
+            launch_time = dt_utc8.replace(tzinfo=None)
+        else:
+            formatted_time = "--"
+            launch_time = None
 
-            token_data = solscan_data["data"]
-            # logger.info(f"Solscan 返回數據: {token_data}")
-            
-            # 檢查必要字段
-            if token_data.get("price") is None or token_data.get("symbol") is None:
-                return None
-                
-            # 如果沒有 market_cap，嘗試計算
-            if token_data.get("market_cap") is None and token_data.get("price") is not None and token_data.get("supply") is not None:
-                try:
-                    price = float(token_data["price"])
-                    supply = float(token_data["supply"])
-                    token_data["market_cap"] = price * supply
-                except (ValueError, TypeError):
-                    logger.error("無法計算市值")
-                    return None
+        # 市值/價格/持有人：優先 ES
+        market_cap = None
+        if es_source:
+            try:
+                es_mc = es_source.get("market_cap_usd")
+                market_cap = float(es_mc) if es_mc is not None else None
+            except Exception:
+                market_cap = None
+        price = None
+        if es_source:
+            try:
+                price = float(es_source.get("price_usd"))
+            except Exception:
+                price = None
+        if (market_cap is None or market_cap == 0) and price is not None and es_source:
+            try:
+                supply_es = es_source.get("total_supply") or 0
+                market_cap = float(price) * float(supply_es)
+            except Exception:
+                pass
+        holders = None
+        if es_source:
+            try:
+                holders = int((es_source.get("holder_info") or {}).get("holder_count", 0))
+            except Exception:
+                holders = None
 
-            # 獲取社交媒體連結
-            has_twitter = False
-            has_website = False
-            twitter_url = None
-            website_url = None
+        # 風險與 Top10/DEV 狀態 from ES
+        if es_source:
+            security_info = es_source.get("security_info") or {}
+            holder_info = es_source.get("holder_info") or {}
+            social_info = es_source.get("social_info") or {}
+            contract_info = es_source.get("contract_info") or {}
 
-            # 從 metadata 中獲取社交媒體連結
-            if "metadata" in token_data and token_data["metadata"]:
-                metadata = token_data["metadata"]
+            dev_status = security_info.get("dev_status")
+            if dev_status is not None:
+                dev_status_map = {0: "DEV持有", 1: "DEV减仓", 2: "DEV加仓", 3: "DEV清仓", 4: "DEV加池子", 5: "DEV烧池子"}
+                dev_status_display = dev_status_map.get(dev_status, "--")
 
-                if "twitter" in metadata and metadata["twitter"]:
+            try:
+                if holder_info.get("top10_percent") is not None:
+                    top10_holding = float(holder_info.get("top10_percent"))
+                elif security_info.get("base_top_10_percent") is not None:
+                    top10_holding = float(security_info.get("base_top_10_percent"))
+                if top10_holding is not None:
+                    top10_holding_display = f"{top10_holding:.2f}"
+            except (ValueError, TypeError):
+                logger.warning("無法解析 top10 百分比")
+
+            try:
+                risk_items = {}
+                primary_code_map = {
+                    "PERMISSION_RENOUNCED": "authority",
+                    "OWNER_CANNOT_CHANGE_BALANCE": "authority",
+                    "OWNER_CANNOT_PAUSE_TRADING": "authority",
+                    "TRANSFER_HOOK": "authority",
+                    "NOT_PIKS": "rug_pull",
+                    "NO_INFLATION_DUMP": "rug_pull",
+                    "TOKEN_CANNOT_SELF_DESTRUCT": "rug_pull",
+                    "LP_LOCKED": "burn_pool",
+                    "SLIPPAGE_IMMUTABLE": "burn_pool",
+                    "NO_BLACKLIST": "blacklist",
+                }
+                risk_items_list = security_info.get("risk_item", []) or []
+                for item in risk_items_list:
+                    code = item.get("code")
+                    risk_status = item.get("riskStatus")
+                    mapped = primary_code_map.get(code)
+                    if mapped and risk_status == "PASS":
+                        risk_items[mapped] = True
+            except Exception as e:
+                logger.error(f"處理風險項目時發生錯誤: {e}")
+
+            # 社交 from ES
+            try:
+                tw = (social_info.get("twitter") or "").strip()
+                if tw:
                     has_twitter = True
-                    twitter_url = metadata["twitter"]
-                    # 確保 Twitter URL 格式正確
-                    if not twitter_url.startswith(("http://", "https://")):
-                        twitter_url = f"https://{twitter_url}"
-
-                if "website" in metadata and metadata["website"]:
+                    twitter_url = tw if tw.startswith(("http://", "https://")) else f"https://{tw}"
+                websites = social_info.get("websites") or []
+                if isinstance(websites, list) and websites:
                     has_website = True
-                    website_url = metadata["website"]
-                    # 確保 Website URL 格式正確
+                    website_url = websites[0]
                     if not website_url.startswith(("http://", "https://")):
                         website_url = f"https://{website_url}"
+            except Exception:
+                pass
 
-            # 獲取創建者錢包餘額
-            dev_wallet_balance = 0.0
-            if "creator" in token_data and token_data["creator"]:
-                creator_address = token_data["creator"]
+            # 創建者地址 from ES，用於查餘額
+            creator_address = (contract_info.get("creator") or "").strip()
+            if creator_address:
                 try:
                     dev_wallet_balance = await get_sol_balance(creator_address)
                 except Exception as e:
                     logger.error(f"獲取創建者錢包餘額時出錯: {e}")
 
-            # 處理內部 API 數據
-            risk_items = {}
-            top10_holding = None
-            top10_holding_display = "--"
-            dev_status = None
-            dev_status_display = "--"
-            if internal_data and internal_data.get("code") == 200 and "data" in internal_data:
-                internal_token_data = internal_data["data"]
-                dev_status = internal_token_data.get("devStatus")
+        # 若仍缺關鍵信息，再調用 Solscan 作備援
+        need_solscan = False
+        if price is None or market_cap in (None, 0) or holders in (None, 0) or (not has_twitter and not has_website) or token_name == "Unknown" or token_symbol == "Unknown" or launch_time is None:
+            need_solscan = True
 
-                if dev_status is not None:
-                    dev_status_map = {
-                        0: "DEV持有",
-                        1: "DEV减仓",
-                        2: "DEV加仓",
-                        3: "DEV清仓",
-                        4: "DEV加池子",
-                        5: "DEV烧池子"
-                    }
-                    dev_status_display = dev_status_map.get(dev_status, "--")
-
-                # 優先從 baseTop10Percent 獲取 top10 持有比例
-                if "baseTop10Percent" in internal_token_data:
-                    try:
-                        top10_holding = float(internal_token_data.get("baseTop10Percent", 0))
-                        # 格式化為普通數字，避免科學計數法
-                        top10_holding_display = f"{top10_holding:.2f}"
-                    except (ValueError, TypeError):
-                        logger.warning(f"無法解析 baseTop10Percent: {internal_token_data.get('baseTop10Percent')}")
-
-                # 解析 riskItem JSON 字符串
-                try:
-                    # 初始化一個空的風險項目字典
-                    risk_items = {}
-
-                    # 項目代碼到風險類型的映射
-                    primary_code_map = {
-                        "PERMISSION_RENOUNCED": "authority",
-                        "NOT_PIKS": "rug_pull",
-                        "LP_LOCKED": "burn_pool",
-                        "NO_BLACKLIST": "blacklist"
-                    }
-
-                    # 解析風險項目列表
-                    risk_items_list = json.loads(internal_token_data.get("riskItem", "[]"))
-                    # logger.info(f"風險項目列表: {risk_items_list}")
-
-                    # 只處理 API 返回的檢測項
-                    for item in risk_items_list:
-                        code = item.get("code")
-                        if code in primary_code_map:
-                            risk_type = primary_code_map[code]
-                            risk_items[risk_type] = item.get("riskStatus") == "PASS"
-                    print(risk_items)
-                except json.JSONDecodeError as e:
-                    logger.error(f"解析 riskItem 時發生錯誤: {e}")
-
-            # 轉換時間戳為 UTC+8 格式
-            created_time = token_data.get("created_time")
-            if created_time:
-                dt = datetime.fromtimestamp(created_time, tz=timezone.utc)
-                dt_utc8 = dt.astimezone(timezone(timedelta(hours=8)))
-                formatted_time = dt_utc8.strftime("%Y.%m.%d %H:%M:%S")
-                launch_time = dt_utc8.replace(tzinfo=None)  # 數據庫存儲用
-            else:
-                formatted_time = "--"
-                launch_time = None
-
-            # 準備顯示和存儲的數據
-            market_cap = token_data.get("market_cap")
-            price = token_data.get("price")
-            holders = token_data.get("holder")
-
-            token_name = token_data.get("name", "Unknown")
-            token_symbol = token_data.get("symbol", "Unknown")
+        if need_solscan:
+            try:
+                url = f"https://pro-api.solscan.io/v2.0/token/meta?address={token_address}"
+                headers = {"token": SOLSCAN_API_TOKEN}
+                async with session.get(url, headers=headers) as response:
+                    if response.status == 200:
+                        solscan_data = await response.json()
+                        if solscan_data.get("success") and solscan_data.get("data"):
+                            sd = solscan_data["data"]
+                            # 名稱/符號
+                            token_name = token_name if token_name and token_name != "Unknown" else sd.get("name", token_name)
+                            token_symbol = token_symbol if token_symbol and token_symbol != "Unknown" else sd.get("symbol", token_symbol)
+                            # 價格
+                            if price is None and sd.get("price") is not None:
+                                try:
+                                    price = float(sd.get("price"))
+                                except Exception:
+                                    pass
+                            # 市值
+                            if market_cap in (None, 0):
+                                mc_val = sd.get("market_cap")
+                                if mc_val is None and sd.get("price") is not None and sd.get("supply") is not None:
+                                    try:
+                                        mc_val = float(sd.get("price")) * float(sd.get("supply"))
+                                    except Exception:
+                                        mc_val = None
+                                try:
+                                    market_cap = float(mc_val) if mc_val is not None else market_cap
+                                except Exception:
+                                    pass
+                            # 持有人數
+                            if holders in (None, 0):
+                                try:
+                                    holders = int(sd.get("holder") or 0)
+                                except Exception:
+                                    pass
+                            # 社交
+                            md = sd.get("metadata") or {}
+                            if not has_twitter and md.get("twitter"):
+                                has_twitter = True
+                                twitter_url = md.get("twitter")
+                                if not twitter_url.startswith(("http://", "https://")):
+                                    twitter_url = f"https://{twitter_url}"
+                            if not has_website and md.get("website"):
+                                has_website = True
+                                website_url = md.get("website")
+                                if not website_url.startswith(("http://", "https://")):
+                                    website_url = f"https://{website_url}"
+                            # 建立時間
+                            if launch_time is None and sd.get("created_time"):
+                                try:
+                                    ct = int(sd.get("created_time"))
+                                    dt = datetime.fromtimestamp(ct, tz=timezone.utc)
+                                    dt_utc8 = dt.astimezone(timezone(timedelta(hours=8)))
+                                    formatted_time = dt_utc8.strftime("%Y.%m.%d %H:%M:%S")
+                                    launch_time = dt_utc8.replace(tzinfo=None)
+                                except Exception:
+                                    pass
+                    else:
+                        logger.warning(f"Solscan 備援請求失敗: HTTP {response.status}")
+            except Exception as e:
+                logger.error(f"Solscan 備援調用異常: {e}")
 
             # 确保它们都不为空
             if not token_name or token_name.strip() == "":
@@ -576,6 +669,16 @@ async def fetch_token_info(token_address: str) -> Optional[Dict]:
             except Exception as e:
                 logger.error(f"获取智能钱活动时出错: {e}")
 
+            # 最小資訊檢查：若名稱/符號皆 Unknown 且無價格/市值，視為資料不足，跳過推送
+            basic_info_missing = (
+                (str(token_name).strip() == "Unknown" or not str(token_name).strip()) and
+                (str(token_symbol).strip() == "Unknown" or not str(token_symbol).strip())
+            )
+            no_valuation = (price in (None, 0) and (market_cap in (None, 0)))
+            if basic_info_missing and no_valuation:
+                logger.info(f"跳過推送：資料不足 token={token_address} (名稱/符號未知且無價格/市值)")
+                return None
+
             return {
                 "token_name": token_name,
                 "token_symbol": token_symbol,
@@ -641,29 +744,39 @@ async def fetch_token_info_premium(token_address: str, token_price: float) -> Op
     }
 
     async with aiohttp.ClientSession() as session:
-        # 從內部 API 獲取數據
-        internal_url = f"{INTERNAL_API_URL}/internal/token_info"
-        params = {
-            "network": "SOLANA",
-            "tokenAddress": token_address,
-            "brand": "BYD"
+        # 從 ES 獲取數據（以 address + SOLANA 精準查詢）
+        es_base_url = os.getenv("ES_BASE_URL", "http://es-sg-2ci4eq22t0001gfig.elasticsearch.aliyuncs.com:9200")
+        es_index = os.getenv("ES_INDEX", "web3_tokens")
+        es_username = os.getenv("ES_USERNAME", "elastic")
+        es_password = os.getenv("ES_PASSWORD", "J4U#dh8Kd1Fz")
+
+        es_detail_url = f"{es_base_url.rstrip('/')}/{es_index}/_search"
+        es_payload = {
+            "query": {
+                "bool": {
+                    "must": [
+                        {"term": {"address": token_address}},
+                        {"term": {"network": "SOLANA"}},
+                    ]
+                }
+            },
+            "size": 1,
         }
-        
+
+        es_source = None
         try:
-            async with session.get(internal_url, params=params) as internal_response:
-                if internal_response.status != 200:
-                    logger.error(f"內部 API 請求失敗: {internal_response.status}")
-                    return None
-                
-                internal_data = await internal_response.json()
-                
-                # 如果返回的數據中沒有 data 字段，表示代幣不存在
-                if internal_data.get("code") == 200 and not internal_data.get("data"):
-                    logger.info(f"代幣不存在: {token_address}")
-                    return None
+            async with session.post(es_detail_url, json=es_payload, auth=aiohttp.BasicAuth(es_username, es_password)) as es_resp:
+                if es_resp.status != 200:
+                    logger.warning(f"ES 查詢失敗: HTTP {es_resp.status}，將嘗試 Solscan 補償")
+                else:
+                    es_json = await es_resp.json()
+                    hits = es_json.get("hits", {}).get("hits", [])
+                    if not hits:
+                        logger.info(f"ES 未找到代幣: {token_address}，將嘗試 Solscan 補償")
+                    else:
+                        es_source = hits[0].get("_source") or None
         except Exception as e:
-            logger.error(f"從內部 API 獲取數據時發生錯誤: {e}")
-            return None
+            logger.warning(f"查詢 ES 發生錯誤: {e}，將嘗試 Solscan 補償")
 
         # 從 Solscan API 獲取基本信息
         url = f"https://pro-api.solscan.io/v2.0/token/meta?address={token_address}"
@@ -729,16 +842,17 @@ async def fetch_token_info_premium(token_address: str, token_price: float) -> Op
                 except Exception as e:
                     logger.error(f"獲取創建者錢包餘額時出錯: {e}")
 
-            # 處理內部 API 數據
+            # 處理 ES 數據（替代原先的內部 API）
             risk_items = {}
             top10_holding = None
             top10_holding_display = "--"
             dev_status = None
             dev_status_display = "--"
-            if internal_data and internal_data.get("code") == 200 and "data" in internal_data:
-                internal_token_data = internal_data["data"]
-                dev_status = internal_token_data.get("devStatus")
+            if es_source:
+                security_info = es_source.get("security_info") or {}
+                holder_info = es_source.get("holder_info") or {}
 
+                dev_status = security_info.get("dev_status")
                 if dev_status is not None:
                     dev_status_map = {
                         0: "DEV持有",
@@ -750,44 +864,55 @@ async def fetch_token_info_premium(token_address: str, token_price: float) -> Op
                     }
                     dev_status_display = dev_status_map.get(dev_status, "--")
 
-                # 優先從 baseTop10Percent 獲取 top10 持有比例
-                if "baseTop10Percent" in internal_token_data:
-                    try:
-                        top10_holding = float(internal_token_data.get("baseTop10Percent", 0))
-                        # 格式化為普通數字，避免科學計數法
-                        top10_holding_display = f"{top10_holding:.2f}"
-                    except (ValueError, TypeError):
-                        logger.warning(f"無法解析 baseTop10Percent: {internal_token_data.get('baseTop10Percent')}")
-
-                # 解析 riskItem JSON 字符串
+                # 優先從 holder_info.top10_percent 取得，若無則嘗試 security_info.base_top_10_percent
                 try:
-                    # 初始化一個空的風險項目字典
+                    if holder_info.get("top10_percent") is not None:
+                        top10_holding = float(holder_info.get("top10_percent"))
+                    elif security_info.get("base_top_10_percent") is not None:
+                        top10_holding = float(security_info.get("base_top_10_percent"))
+                    if top10_holding is not None:
+                        top10_holding_display = f"{top10_holding:.2f}"
+                except (ValueError, TypeError):
+                    logger.warning("無法解析 top10 百分比")
+
+                # 轉換 ES 的 risk_item 列表到我們的四類
+                try:
                     risk_items = {}
-
-                    # 項目代碼到風險類型的映射
                     primary_code_map = {
+                        # 權限/所有權相關
                         "PERMISSION_RENOUNCED": "authority",
+                        "OWNER_CANNOT_CHANGE_BALANCE": "authority",
+                        "OWNER_CANNOT_PAUSE_TRADING": "authority",
+                        "TRANSFER_HOOK": "authority",
+                        # 風險/跑路相關
                         "NOT_PIKS": "rug_pull",
+                        "NO_INFLATION_DUMP": "rug_pull",
+                        "TOKEN_CANNOT_SELF_DESTRUCT": "rug_pull",
+                        # 鎖池/滑點不可變 等近似視為 burn_pool 類
                         "LP_LOCKED": "burn_pool",
-                        "NO_BLACKLIST": "blacklist"
+                        "SLIPPAGE_IMMUTABLE": "burn_pool",
+                        # 黑名單
+                        "NO_BLACKLIST": "blacklist",
                     }
-
-                    # 解析風險項目列表
-                    risk_items_list = json.loads(internal_token_data.get("riskItem", "[]"))
-                    # logger.info(f"風險項目列表: {risk_items_list}")
-
-                    # 只處理 API 返回的檢測項
+                    risk_items_list = security_info.get("risk_item", []) or []
                     for item in risk_items_list:
                         code = item.get("code")
-                        if code in primary_code_map:
-                            risk_type = primary_code_map[code]
-                            risk_items[risk_type] = item.get("riskStatus") == "PASS"
-
-                except json.JSONDecodeError as e:
-                    logger.error(f"解析 riskItem 時發生錯誤: {e}")
+                        risk_status = item.get("riskStatus")
+                        mapped = primary_code_map.get(code)
+                        if mapped:
+                            # 任一對應 code PASS 則視為該類 True
+                            if risk_status == "PASS":
+                                risk_items[mapped] = True
+                except Exception as e:
+                    logger.error(f"處理風險項目時發生錯誤: {e}")
 
             # 轉換時間戳為 UTC+8 格式
             created_time = token_data.get("created_time")
+            if created_time is None and es_source:
+                try:
+                    created_time = int(int(es_source.get("created_at") or 0) / 1000)
+                except Exception:
+                    created_time = None
             if created_time:
                 dt = datetime.fromtimestamp(created_time, tz=timezone.utc)
                 dt_utc8 = dt.astimezone(timezone(timedelta(hours=8)))
@@ -799,8 +924,32 @@ async def fetch_token_info_premium(token_address: str, token_price: float) -> Op
 
             # 準備顯示和存儲的數據
             market_cap = token_data.get("market_cap")
+            # 若 ES 有 market_cap_usd 為 0，嘗試以 price_usd * total_supply 作為補充
+            if (market_cap is None or market_cap == 0) and es_source:
+                try:
+                    es_mc = es_source.get("market_cap_usd")
+                    if es_mc and float(es_mc) > 0:
+                        market_cap = float(es_mc)
+                    else:
+                        price_es = es_source.get("price_usd") or 0
+                        supply_es = es_source.get("total_supply") or 0
+                        market_cap = float(price_es) * float(supply_es)
+                except Exception:
+                    pass
+
             price = token_price
+            if price is None and es_source:
+                try:
+                    price = float(es_source.get("price_usd"))
+                except Exception:
+                    price = None
+
             holders = token_data.get("holder")
+            if (holders is None or holders == 0) and es_source:
+                try:
+                    holders = int((es_source.get("holder_info") or {}).get("holder_count", 0))
+                except Exception:
+                    pass
 
             token_name = token_data.get("name", "Unknown")
             token_symbol = token_data.get("symbol", "Unknown")
@@ -907,6 +1056,16 @@ async def fetch_token_info_premium(token_address: str, token_price: float) -> Op
                 "twitter_url": twitter_url,
                 "website_url": website_url
             }
+
+            # 最小資訊檢查：若名稱/符號皆 Unknown 且無價格/市值，視為資料不足，跳過推送
+            basic_info_missing = (
+                (str(token_name).strip() == "Unknown" or not str(token_name).strip()) and
+                (str(token_symbol).strip() == "Unknown" or not str(token_symbol).strip())
+            )
+            no_valuation = (price in (None, 0) and (market_cap in (None, 0)))
+            if basic_info_missing and no_valuation:
+                logger.info(f"跳過推送：資料不足 token={token_address} (名稱/符號未知且無價格/市值)")
+                return None
 
             # 更新 crypto_data 字典
             crypto_data.update({
@@ -1016,17 +1175,15 @@ async def tg_push():
                 'message': f'Invalid chain parameter. Must be one of: {", ".join(ALLOWED_CHAINS)}'
             }), 400
 
-        # 檢查是否正在處理
-        is_processing = False
+        # 檢查並標記處理中（去重：入隊即標記）
         async with processing_lock:
-            is_processing = token_address in processed_tokens
-
-        if is_processing:
-            logger.info(f"代幣已在處理中: {token_address}")
-            return jsonify({
-                'status': 'success',
-                'message': 'Token is already being processed'
-            })
+            if token_address in processed_tokens:
+                logger.info(f"代幣已在處理中: {token_address}")
+                return jsonify({
+                    'status': 'success',
+                    'message': 'Token is already being processed'
+                })
+            processed_tokens.add(token_address)
 
         # 將任務添加到隊列
         logger.info(f"將代幣添加到處理隊列: chain={chain}, address={token_address}")
@@ -1060,6 +1217,17 @@ async def tg_push_premium():
         for field in required_fields:
             if field not in data:
                 return jsonify({"error": f"缺少必要字段: {field}"}), 400
+
+        address = data.get('token_address')
+        level = int(data.get('market_cap_level') or 0)
+
+        # premium 等級去重：僅更高等級允許入隊
+        async with premium_lock:
+            prev = premium_max_level.get(address, 0)
+            if level <= prev:
+                logger.info(f"Premium 去重：忽略非升級請求 address={address}, level={level}, prev={prev}")
+                return jsonify({'status': 'success', 'message': 'Duplicate (non-upgrade) premium request ignored'})
+            premium_max_level[address] = level
 
         # 將任務添加到隊列
         with queue_lock:
@@ -1120,7 +1288,7 @@ async def get_sol_balance(wallet_address: str) -> float:
         # 從回應中獲取值
         # solders.rpc.responses.GetBalanceResp 格式有所不同
         sol_balance = float(balance_response.value) / 10**9
-        logger.info(f"錢包 {wallet_address} 的 SOL 餘額: {sol_balance}")
+        # logger.info(f"錢包 {wallet_address} 的 SOL 餘額: {sol_balance}")
         return sol_balance
     except Exception as e:
         logger.error(f"使用主要 RPC 獲取 SOL 餘額時發生異常: {e}")

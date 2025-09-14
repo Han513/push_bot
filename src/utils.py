@@ -18,8 +18,8 @@ async def get_additional_channels() -> Dict[str, List[Dict[str, str]]]:
     """
     從社交API獲取額外的頻道信息
     返回格式: {
-        "high_freq": [{"group_id": "xxx", "topic_id": "xxx"}, ...],
-        "low_freq": [{"group_id": "xxx", "topic_id": "xxx"}, ...]
+        "high_freq": [{"group_id": "xxx", "topic_id": "xxx", "language": "en"}, ...],
+        "low_freq": [{"group_id": "xxx", "topic_id": "xxx", "language": "en"}, ...]
     }
     """
     try:
@@ -40,6 +40,16 @@ async def get_additional_channels() -> Dict[str, List[Dict[str, str]]]:
                 # 遍歷所有用戶的聊天組
                 for user_data in data.get("data", []):
                     social_group = user_data.get("socialGroup")
+                    # 語言標準化：如 es_ES -> es；為空或 None 時使用 en
+                    raw_lang = user_data.get("lang")
+                    language = "en"
+                    if raw_lang:
+                        try:
+                            language_part = str(raw_lang).split("_")[0].lower()
+                            if language_part:
+                                language = language_part
+                        except Exception:
+                            language = "en"
                     if not social_group:
                         continue
                         
@@ -53,12 +63,14 @@ async def get_additional_channels() -> Dict[str, List[Dict[str, str]]]:
                         if "WEB3 Signal - High Freq" in chat_name:
                             high_freq_channels.append({
                                 "group_id": social_group,
-                                "topic_id": chat_id
+                                "topic_id": chat_id,
+                                "language": language
                             })
                         elif "WEB3 Signal – Low Freq" in chat_name:
                             low_freq_channels.append({
                                 "group_id": social_group,
-                                "topic_id": chat_id
+                                "topic_id": chat_id,
+                                "language": language
                             })
                 
                 return {
