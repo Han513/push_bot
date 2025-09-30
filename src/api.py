@@ -8,6 +8,7 @@ from main import push_to_channel, format_message, init_bot
 from models import get_session, add_crypto_info, get_cached_wallets
 import os
 from dotenv import load_dotenv
+from logging_setup import setup_logging
 import aiohttp
 from datetime import datetime, timezone, timedelta
 import threading
@@ -23,6 +24,7 @@ logger = logging.getLogger(__name__)
 
 # 載入環境變數
 load_dotenv(override=True)
+setup_logging()
 CHANNEL_ID = os.getenv("ANNOUNCEMENT_CHANNEL_ID")
 SOLSCAN_API_TOKEN = os.getenv("SOLSCAN_API_TOKEN")
 INTERNAL_API_URL = os.getenv("INTERNAL_API_URL", "http://moonx.backend:4200")
@@ -31,6 +33,14 @@ RPC_URL_BACKUP = os.getenv("RPC_URL_backup")
 LOCAL = os.getenv("LOCAL")
 SMART_MONEY = os.getenv("SMART_MONEY")
 SOCIALS_API_URL = os.getenv("SOCIALS_API_URL", "http://172.31.91.67:5002/admin/telegram/social/socials")
+
+# 請求超時（秒）
+ES_REQUEST_TIMEOUT = int(os.getenv("ES_REQUEST_TIMEOUT", "3"))
+SOLSCAN_REQUEST_TIMEOUT = int(os.getenv("SOLSCAN_REQUEST_TIMEOUT", "3"))
+ES_REQUEST_RETRIES = int(os.getenv("ES_REQUEST_RETRIES", "2"))
+SOLSCAN_REQUEST_RETRIES = int(os.getenv("SOLSCAN_REQUEST_RETRIES", "2"))
+ES_RETRY_BACKOFF = float(os.getenv("ES_RETRY_BACKOFF", "0.5"))
+SOLSCAN_RETRY_BACKOFF = float(os.getenv("SOLSCAN_RETRY_BACKOFF", "0.5"))
 
 # 創建應用實例
 app = Quart(__name__)
@@ -333,19 +343,33 @@ async def fetch_token_info(token_address: str) -> Optional[Dict]:
         }
 
         es_source = None
-        try:
-            async with session.post(es_detail_url, json=es_payload, auth=aiohttp.BasicAuth(es_username, es_password)) as es_resp:
-                if es_resp.status != 200:
-                    logger.warning(f"ES 查詢失敗: HTTP {es_resp.status}，將嘗試 Solscan 補償")
-                else:
-                    es_json = await es_resp.json()
-                    hits = es_json.get("hits", {}).get("hits", [])
-                    if not hits:
-                        logger.info(f"ES 未找到代幣: {token_address}，將嘗試 Solscan 補償")
+        # 帶重試的 ES 查詢
+        es_attempt = 0
+        while es_attempt <= ES_REQUEST_RETRIES:
+            try:
+                async with session.post(
+                    es_detail_url,
+                    json=es_payload,
+                    auth=aiohttp.BasicAuth(es_username, es_password),
+                    timeout=aiohttp.ClientTimeout(total=ES_REQUEST_TIMEOUT),
+                ) as es_resp:
+                    if es_resp.status != 200:
+                        logger.warning(f"ES 查詢失敗: HTTP {es_resp.status} (attempt={es_attempt+1}/{ES_REQUEST_RETRIES+1})")
                     else:
-                        es_source = hits[0].get("_source") or None
-        except Exception as e:
-            logger.warning(f"查詢 ES 發生錯誤: {e}，將嘗試 Solscan 補償")
+                        es_json = await es_resp.json()
+                        hits = es_json.get("hits", {}).get("hits", [])
+                        if not hits:
+                            logger.info(f"ES 未找到代幣: {token_address}")
+                        else:
+                            es_source = hits[0].get("_source") or None
+                            break
+            except asyncio.TimeoutError:
+                logger.warning(f"ES 查詢超時 {ES_REQUEST_TIMEOUT}s (attempt={es_attempt+1}/{ES_REQUEST_RETRIES+1}): address={token_address}")
+            except Exception as e:
+                logger.warning(f"查詢 ES 發生錯誤 (attempt={es_attempt+1}/{ES_REQUEST_RETRIES+1}): {e}")
+            es_attempt += 1
+            if es_attempt <= ES_REQUEST_RETRIES:
+                await asyncio.sleep(ES_RETRY_BACKOFF * es_attempt)
 
         # ES 優先，Solscan 作為備援
         has_twitter = False
@@ -386,25 +410,43 @@ async def fetch_token_info(token_address: str) -> Optional[Dict]:
         if es_source:
             try:
                 es_mc = es_source.get("market_cap_usd")
-                market_cap = float(es_mc) if es_mc is not None else None
+                if es_mc is not None:
+                    mc_val = float(es_mc)
+                    market_cap = mc_val if mc_val > 0 else None
             except Exception:
                 market_cap = None
+            # 若 market_cap_usd 無效，嘗試 fdv_usd
+            if market_cap is None:
+                try:
+                    es_fdv = es_source.get("fdv_usd")
+                    if es_fdv is not None:
+                        fdv_val = float(es_fdv)
+                        market_cap = fdv_val if fdv_val > 0 else None
+                except Exception:
+                    pass
         price = None
         if es_source:
             try:
-                price = float(es_source.get("price_usd"))
+                p = es_source.get("price_usd")
+                if p is not None:
+                    p_val = float(p)
+                    price = p_val if p_val > 0 else None
             except Exception:
                 price = None
-        if (market_cap is None or market_cap == 0) and price is not None and es_source:
+        if (market_cap is None) and price is not None and es_source:
             try:
                 supply_es = es_source.get("total_supply") or 0
-                market_cap = float(price) * float(supply_es)
+                mc_calc = float(price) * float(supply_es)
+                market_cap = mc_calc if mc_calc > 0 else None
             except Exception:
                 pass
         holders = None
         if es_source:
             try:
-                holders = int((es_source.get("holder_info") or {}).get("holder_count", 0))
+                raw_h = (es_source.get("holder_info") or {}).get("holder_count")
+                if raw_h is not None:
+                    h_val = int(raw_h)
+                    holders = h_val if h_val > 0 else None
             except Exception:
                 holders = None
 
@@ -483,67 +525,86 @@ async def fetch_token_info(token_address: str) -> Optional[Dict]:
             need_solscan = True
 
         if need_solscan:
-            try:
-                url = f"https://pro-api.solscan.io/v2.0/token/meta?address={token_address}"
-                headers = {"token": SOLSCAN_API_TOKEN}
-                async with session.get(url, headers=headers) as response:
-                    if response.status == 200:
-                        solscan_data = await response.json()
-                        if solscan_data.get("success") and solscan_data.get("data"):
-                            sd = solscan_data["data"]
-                            # 名稱/符號
-                            token_name = token_name if token_name and token_name != "Unknown" else sd.get("name", token_name)
-                            token_symbol = token_symbol if token_symbol and token_symbol != "Unknown" else sd.get("symbol", token_symbol)
-                            # 價格
-                            if price is None and sd.get("price") is not None:
-                                try:
-                                    price = float(sd.get("price"))
-                                except Exception:
-                                    pass
-                            # 市值
-                            if market_cap in (None, 0):
-                                mc_val = sd.get("market_cap")
-                                if mc_val is None and sd.get("price") is not None and sd.get("supply") is not None:
+            # 帶重試的 Solscan 查詢
+            sc_attempt = 0
+            while sc_attempt <= SOLSCAN_REQUEST_RETRIES:
+                try:
+                    url = f"https://pro-api.solscan.io/v2.0/token/meta?address={token_address}"
+                    headers = {"token": SOLSCAN_API_TOKEN}
+                    async with session.get(
+                        url,
+                        headers=headers,
+                        timeout=aiohttp.ClientTimeout(total=SOLSCAN_REQUEST_TIMEOUT),
+                    ) as response:
+                        if response.status == 200:
+                            solscan_data = await response.json()
+                            if solscan_data.get("success") and solscan_data.get("data"):
+                                sd = solscan_data["data"]
+                                # 名稱/符號
+                                token_name = token_name if token_name and token_name != "Unknown" else sd.get("name", token_name)
+                                token_symbol = token_symbol if token_symbol and token_symbol != "Unknown" else sd.get("symbol", token_symbol)
+                                # 價格
+                                if price is None and sd.get("price") is not None:
                                     try:
-                                        mc_val = float(sd.get("price")) * float(sd.get("supply"))
+                                        p = float(sd.get("price"))
+                                        price = p if p > 0 else None
                                     except Exception:
-                                        mc_val = None
-                                try:
-                                    market_cap = float(mc_val) if mc_val is not None else market_cap
-                                except Exception:
-                                    pass
-                            # 持有人數
-                            if holders in (None, 0):
-                                try:
-                                    holders = int(sd.get("holder") or 0)
-                                except Exception:
-                                    pass
-                            # 社交
-                            md = sd.get("metadata") or {}
-                            if not has_twitter and md.get("twitter"):
-                                has_twitter = True
-                                twitter_url = md.get("twitter")
-                                if not twitter_url.startswith(("http://", "https://")):
-                                    twitter_url = f"https://{twitter_url}"
-                            if not has_website and md.get("website"):
-                                has_website = True
-                                website_url = md.get("website")
-                                if not website_url.startswith(("http://", "https://")):
-                                    website_url = f"https://{website_url}"
-                            # 建立時間
-                            if launch_time is None and sd.get("created_time"):
-                                try:
-                                    ct = int(sd.get("created_time"))
-                                    dt = datetime.fromtimestamp(ct, tz=timezone.utc)
-                                    dt_utc8 = dt.astimezone(timezone(timedelta(hours=8)))
-                                    formatted_time = dt_utc8.strftime("%Y.%m.%d %H:%M:%S")
-                                    launch_time = dt_utc8.replace(tzinfo=None)
-                                except Exception:
-                                    pass
-                    else:
-                        logger.warning(f"Solscan 備援請求失敗: HTTP {response.status}")
-            except Exception as e:
-                logger.error(f"Solscan 備援調用異常: {e}")
+                                        pass
+                                # 市值
+                                if market_cap in (None, 0):
+                                    mc_val = sd.get("market_cap")
+                                    if mc_val is None and sd.get("price") is not None and sd.get("supply") is not None:
+                                        try:
+                                            mc_val = float(sd.get("price")) * float(sd.get("supply"))
+                                        except Exception:
+                                            mc_val = None
+                                    try:
+                                        if mc_val is not None:
+                                            mc = float(mc_val)
+                                            market_cap = mc if mc > 0 else market_cap
+                                    except Exception:
+                                        pass
+                                # 持有人數
+                                if holders in (None, 0):
+                                    try:
+                                        raw_h = sd.get("holder")
+                                        if raw_h is not None:
+                                            h = int(raw_h)
+                                            holders = h if h > 0 else holders
+                                    except Exception:
+                                        pass
+                                # 社交
+                                md = sd.get("metadata") or {}
+                                if not has_twitter and md.get("twitter"):
+                                    has_twitter = True
+                                    twitter_url = md.get("twitter")
+                                    if not twitter_url.startswith(("http://", "https://")):
+                                        twitter_url = f"https://{twitter_url}"
+                                if not has_website and md.get("website"):
+                                    has_website = True
+                                    website_url = md.get("website")
+                                    if not website_url.startswith(("http://", "https://")):
+                                        website_url = f"https://{website_url}"
+                                # 建立時間
+                                if launch_time is None and sd.get("created_time"):
+                                    try:
+                                        ct = int(sd.get("created_time"))
+                                        dt = datetime.fromtimestamp(ct, tz=timezone.utc)
+                                        dt_utc8 = dt.astimezone(timezone(timedelta(hours=8)))
+                                        formatted_time = dt_utc8.strftime("%Y.%m.%d %H:%M:%S")
+                                        launch_time = dt_utc8.replace(tzinfo=None)
+                                    except Exception:
+                                        pass
+                                break
+                        else:
+                            logger.warning(f"Solscan 備援請求失敗: HTTP {response.status} (attempt={sc_attempt+1}/{SOLSCAN_REQUEST_RETRIES+1})")
+                except asyncio.TimeoutError:
+                    logger.warning(f"Solscan 查詢超時 {SOLSCAN_REQUEST_TIMEOUT}s (attempt={sc_attempt+1}/{SOLSCAN_REQUEST_RETRIES+1}): address={token_address}")
+                except Exception as e:
+                    logger.error(f"Solscan 備援調用異常 (attempt={sc_attempt+1}/{SOLSCAN_REQUEST_RETRIES+1}): {e}")
+                sc_attempt += 1
+                if sc_attempt <= SOLSCAN_REQUEST_RETRIES:
+                    await asyncio.sleep(SOLSCAN_RETRY_BACKOFF * sc_attempt)
 
             # 确保它们都不为空
             if not token_name or token_name.strip() == "":
@@ -669,14 +730,11 @@ async def fetch_token_info(token_address: str) -> Optional[Dict]:
             except Exception as e:
                 logger.error(f"获取智能钱活动时出错: {e}")
 
-            # 最小資訊檢查：若名稱/符號皆 Unknown 且無價格/市值，視為資料不足，跳過推送
-            basic_info_missing = (
-                (str(token_name).strip() == "Unknown" or not str(token_name).strip()) and
-                (str(token_symbol).strip() == "Unknown" or not str(token_symbol).strip())
-            )
-            no_valuation = (price in (None, 0) and (market_cap in (None, 0)))
-            if basic_info_missing and no_valuation:
-                logger.info(f"跳過推送：資料不足 token={token_address} (名稱/符號未知且無價格/市值)")
+            # 最終必備校驗（普通路徑）：必須取得 價格、市值、持幣人數，且都 > 0
+            if price is None or market_cap is None or holders is None or price <= 0 or market_cap <= 0 or holders <= 0:
+                logger.info(
+                    f"跳過推送：缺少關鍵數據 token={token_address}, price={price}, market_cap={market_cap}, holders={holders}"
+                )
                 return None
 
             return {
@@ -765,7 +823,12 @@ async def fetch_token_info_premium(token_address: str, token_price: float) -> Op
 
         es_source = None
         try:
-            async with session.post(es_detail_url, json=es_payload, auth=aiohttp.BasicAuth(es_username, es_password)) as es_resp:
+            async with session.post(
+                es_detail_url,
+                json=es_payload,
+                auth=aiohttp.BasicAuth(es_username, es_password),
+                timeout=aiohttp.ClientTimeout(total=ES_REQUEST_TIMEOUT),
+            ) as es_resp:
                 if es_resp.status != 200:
                     logger.warning(f"ES 查詢失敗: HTTP {es_resp.status}，將嘗試 Solscan 補償")
                 else:
@@ -775,6 +838,8 @@ async def fetch_token_info_premium(token_address: str, token_price: float) -> Op
                         logger.info(f"ES 未找到代幣: {token_address}，將嘗試 Solscan 補償")
                     else:
                         es_source = hits[0].get("_source") or None
+        except asyncio.TimeoutError:
+            logger.warning(f"ES 查詢超時 {ES_REQUEST_TIMEOUT}s: address={token_address}")
         except Exception as e:
             logger.warning(f"查詢 ES 發生錯誤: {e}，將嘗試 Solscan 補償")
 
@@ -782,7 +847,11 @@ async def fetch_token_info_premium(token_address: str, token_price: float) -> Op
         url = f"https://pro-api.solscan.io/v2.0/token/meta?address={token_address}"
         headers = {"token": SOLSCAN_API_TOKEN}
 
-        async with session.get(url, headers=headers) as response:
+        async with session.get(
+            url,
+            headers=headers,
+            timeout=aiohttp.ClientTimeout(total=SOLSCAN_REQUEST_TIMEOUT),
+        ) as response:
             if response.status != 200:
                 logger.error(f"從 Solscan API 獲取數據失敗: {response.status}")
                 return None
@@ -924,23 +993,41 @@ async def fetch_token_info_premium(token_address: str, token_price: float) -> Op
 
             # 準備顯示和存儲的數據
             market_cap = token_data.get("market_cap")
-            # 若 ES 有 market_cap_usd 為 0，嘗試以 price_usd * total_supply 作為補充
+            # 若 ES 有 market_cap_usd/或 fdv_usd 可用，優先使用；否則再嘗試 price*total_supply
             if (market_cap is None or market_cap == 0) and es_source:
                 try:
                     es_mc = es_source.get("market_cap_usd")
                     if es_mc and float(es_mc) > 0:
                         market_cap = float(es_mc)
                     else:
-                        price_es = es_source.get("price_usd") or 0
-                        supply_es = es_source.get("total_supply") or 0
-                        market_cap = float(price_es) * float(supply_es)
+                        es_fdv = es_source.get("fdv_usd")
+                        if es_fdv and float(es_fdv) > 0:
+                            market_cap = float(es_fdv)
+                        else:
+                            price_es = es_source.get("price_usd") or 0
+                            supply_es = es_source.get("total_supply") or 0
+                            market_cap = float(price_es) * float(supply_es)
                 except Exception:
                     pass
 
-            price = token_price
+            # 若上游客戶傳入為 None 或 0，視為缺值，嘗試從 ES 補充；若仍缺，再用 Solscan
+            price = None
+            try:
+                if token_price not in (None, 0, 0.0, "0", "0.0"):
+                    price = float(token_price)
+            except Exception:
+                price = None
             if price is None and es_source:
                 try:
                     price = float(es_source.get("price_usd"))
+                except Exception:
+                    price = None
+            # 最後嘗試使用 Solscan 的價格
+            if price is None:
+                try:
+                    sc_price = token_data.get("price")
+                    if sc_price not in (None, 0, 0.0, "0", "0.0"):
+                        price = float(sc_price)
                 except Exception:
                     price = None
 
@@ -1057,14 +1144,11 @@ async def fetch_token_info_premium(token_address: str, token_price: float) -> Op
                 "website_url": website_url
             }
 
-            # 最小資訊檢查：若名稱/符號皆 Unknown 且無價格/市值，視為資料不足，跳過推送
-            basic_info_missing = (
-                (str(token_name).strip() == "Unknown" or not str(token_name).strip()) and
-                (str(token_symbol).strip() == "Unknown" or not str(token_symbol).strip())
-            )
-            no_valuation = (price in (None, 0) and (market_cap in (None, 0)))
-            if basic_info_missing and no_valuation:
-                logger.info(f"跳過推送：資料不足 token={token_address} (名稱/符號未知且無價格/市值)")
+            # 最小資訊檢查（premium 與普通一致：價格、市值、持幣都需 > 0）
+            if price in (None, 0) or market_cap in (None, 0) or holders in (None, 0):
+                logger.info(
+                    f"跳過推送：缺少關鍵數據 token={token_address}, price={price}, market_cap={market_cap}, holders={holders}"
+                )
                 return None
 
             # 更新 crypto_data 字典

@@ -7,9 +7,11 @@ from typing import Optional
 import aiohttp
 from aiokafka import AIOKafkaConsumer
 from dotenv import load_dotenv
+from logging_setup import setup_logging
 
 
 load_dotenv(override=True)
+setup_logging()
 logger = logging.getLogger(__name__)
 
 

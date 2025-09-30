@@ -5,11 +5,13 @@ from typing import List, Dict, Optional, Any
 
 import aiohttp
 from dotenv import load_dotenv
+from logging_setup import setup_logging
 import time
 
 
 # 載入環境變數
 load_dotenv(override=True)
+setup_logging()
 
 logger = logging.getLogger(__name__)
 
@@ -21,13 +23,13 @@ ES_USERNAME = os.getenv("ES_USERNAME", "elastic")
 ES_PASSWORD = os.getenv("ES_PASSWORD", "J4U#dh8Kd1Fz")
 
 # 查詢設定
-ES_QUERY_SIZE = int(os.getenv("ES_QUERY_SIZE", "100"))
+ES_QUERY_SIZE = int(os.getenv("ES_QUERY_SIZE", "500"))
 ES_SORT_FIELD = os.getenv("ES_SORT_FIELD", "heat_score.m5")
 ES_SORT_ORDER = os.getenv("ES_SORT_ORDER", "desc")
 
 # 定時任務間隔（秒）
 FETCH_INTERVAL_SECONDS = int(os.getenv("HOT_TOKEN_FETCH_INTERVAL_SECONDS", "60"))
-DETAIL_MAX_TOKENS_PER_CYCLE = int(os.getenv("DETAIL_MAX_TOKENS_PER_CYCLE", "50"))
+DETAIL_MAX_TOKENS_PER_CYCLE = int(os.getenv("DETAIL_MAX_TOKENS_PER_CYCLE", "100"))
 DETAIL_CONCURRENCY = int(os.getenv("DETAIL_CONCURRENCY", "10"))
 
 # 本地/服務 API 設定（對 /api/tg_push_premium 發送）
@@ -190,6 +192,13 @@ def _compute_market_cap_usd(src: Dict[str, Any]) -> float:
         market_cap_val = 0.0
     if market_cap_val > 0:
         return market_cap_val
+    # 次級回退：fdv_usd
+    try:
+        fdv_val = float(src.get("fdv_usd")) if src.get("fdv_usd") is not None else 0.0
+    except Exception:
+        fdv_val = 0.0
+    if fdv_val > 0:
+        return fdv_val
     # fallback = price_usd * total_supply
     price = src.get("price_usd")
     total_supply = src.get("total_supply")
@@ -297,12 +306,12 @@ async def _post_premium_push(session: aiohttp.ClientSession, payload: Dict[str, 
         return False
 
 
-async def try_push_token(session: aiohttp.ClientSession, src: Dict[str, Any]) -> None:
+async def try_push_token(session: aiohttp.ClientSession, src: Dict[str, Any]) -> bool:
     address: str = src.get("address") or ""
     if not address or address in EXCLUDED_ADDRESSES:
         if address in EXCLUDED_ADDRESSES:
             logger.debug(f"推送跳過: address 在排除清單")
-        return
+        return False
 
     market_cap = _compute_market_cap_usd(src)
     target_level = _tier_from_market_cap(market_cap)
@@ -310,7 +319,7 @@ async def try_push_token(session: aiohttp.ClientSession, src: Dict[str, Any]) ->
         logger.debug(
             f"推送跳過: 市值不足 address={address}, market_cap_usd={market_cap:.2f}"
         )
-        return
+        return False
 
     # 新增：根據級別校驗 5 分鐘成交筆數與成交額
     m5_txns = _get_m5_total_txns(src)
@@ -325,7 +334,7 @@ async def try_push_token(session: aiohttp.ClientSession, src: Dict[str, Any]) ->
         logger.debug(
             f"推送跳過: 5m條件不足 address={address}, level={target_level}, txns={m5_txns}/{req_txns}, vol=${m5_volume:.0f}/${req_vol:.0f}"
         )
-        return
+        return False
 
     # 速率限制：1小時內最多推送2個不同代幣
     async with _push_lock:
@@ -351,7 +360,7 @@ async def try_push_token(session: aiohttp.ClientSession, src: Dict[str, Any]) ->
                 logger.info(
                     f"推送跳過: 速率限制 一小時已推送 {len(unique_recent)} 個代幣，限制={_UNIQUE_TOKENS_PER_HOUR_LIMIT}，address={address}"
                 )
-                return
+                return False
             _address_to_first_push_ts[address] = _now_ts()
 
         # 準備 payload
@@ -362,7 +371,12 @@ async def try_push_token(session: aiohttp.ClientSession, src: Dict[str, Any]) ->
         except Exception:
             created_at_ms_val = 0
         created_at_sec = created_at_ms_val // 1000 if created_at_ms_val > 0 else 0
-        price_usd = src.get("price_usd") or 0
+        # 價格若缺失/為 0，傳遞 None 讓下游自行回退（避免顯示為 0）
+        raw_price = src.get("price_usd")
+        try:
+            price_usd = float(raw_price) if raw_price not in (None, "", 0, 0.0, "0", "0.0") else None
+        except Exception:
+            price_usd = None
 
         payload = {
             "token_address": address,
@@ -381,6 +395,8 @@ async def try_push_token(session: aiohttp.ClientSession, src: Dict[str, Any]) ->
         logger.info(
             f"已推送: address={address}, level={target_level}, market_cap_usd={market_cap:.2f}"
         )
+        return True
+    return False
 
 
 async def _scheduler_loop() -> None:
@@ -398,16 +414,14 @@ async def _scheduler_loop() -> None:
                     f"本次獲取 SOLANA tokens: {len(addresses)}，樣例: {addresses[:5]}"
                 )
 
-                # 僅處理前 N 筆以控制壓力
-                target_addresses = addresses[:DETAIL_MAX_TOKENS_PER_CYCLE]
-
+                # 批次並發處理：若前一批沒有任何成功推送，繼續往下掃描
                 sem = asyncio.Semaphore(DETAIL_CONCURRENCY)
 
-                async def process_address(addr: str) -> None:
+                async def process_address(addr: str) -> bool:
                     async with sem:
                         src = await fetch_token_detail(session, addr)
                     if not src:
-                        return
+                        return False
                     matched = evaluate_token_tiers(src)
                     if matched:
                         symbol = src.get("symbol") or ""
@@ -418,11 +432,25 @@ async def _scheduler_loop() -> None:
                         logger.info(
                             f"命中條件: address={addr}, symbol={symbol}, name={name}, tiers={matched}, market_cap_usd={market_cap:.2f}, m5_total_txns={m5_txns}, m5_volume_usd={m5_volume:.0f}"
                         )
+                    # 無論 evaluate 是否命中，最終以 try_push_token 的條件為準
+                    pushed = await try_push_token(session, src)
+                    return pushed
 
-                    # 命中與否都嘗試做推送升級邏輯（僅在達到對應市值級別時會推送）
-                    await try_push_token(session, src)
+                # 逐批處理整個清單，直到本輪至少推送一個或全部掃完
+                pushed_this_round = 0
+                start_index = 0
+                total = len(addresses)
+                while start_index < total and pushed_this_round == 0:
+                    batch = addresses[start_index:start_index + DETAIL_MAX_TOKENS_PER_CYCLE]
+                    if not batch:
+                        break
+                    results = await asyncio.gather(*(process_address(a) for a in batch))
+                    pushed_in_batch = sum(1 for r in results if r)
+                    pushed_this_round += pushed_in_batch
+                    start_index += DETAIL_MAX_TOKENS_PER_CYCLE
 
-                await asyncio.gather(*(process_address(a) for a in target_addresses))
+                if pushed_this_round == 0:
+                    logger.info("本輪未找到符合推送條件的代幣，已掃描完整清單或達到批次上限")
             except Exception as e:
                 logger.error(f"定時任務執行錯誤: {e}")
             await asyncio.sleep(FETCH_INTERVAL_SECONDS)

@@ -6,6 +6,7 @@ import asyncio
 import traceback
 from typing import Dict, Optional
 from dotenv import load_dotenv
+from logging_setup import setup_logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, Bot
 from telegram.ext import Application, CommandHandler, ContextTypes, Defaults
 from telegram.error import NetworkError, TimedOut, RetryAfter
@@ -19,6 +20,7 @@ from utils import get_additional_channels
 
 # 載入環境變數
 load_dotenv(override=True)
+setup_logging()
 logger = logging.getLogger(__name__)
 
 # 從環境變量加載語言群組配置
@@ -26,14 +28,7 @@ LANGUAGE_GROUPS = json.loads(os.getenv("LANGUAGE_GROUPS", "{}"))
 if not LANGUAGE_GROUPS:
     logger.warning("未設置 LANGUAGE_GROUPS 環境變數，將使用默認配置")
 
-# 設置日誌
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO,
-    handlers=[
-        logging.StreamHandler()  # 只輸出到控制台
-    ]
-)
+# 日誌輸出已集中到 push_bot/logs，這裡不再額外設定 console handler
 
 # 設置 httpx 的日誌級別為 WARNING，這樣就不會顯示 HTTP 請求日誌
 logging.getLogger('httpx').setLevel(logging.WARNING)

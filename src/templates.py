@@ -1771,8 +1771,8 @@ def format_premium_message(data: Dict, language: str = "en") -> str:
 
     # 市值等級
     market_cap_level = data.get('market_cap_level', 1)
-    market_cap_levels = {1: "2M", 2: "3M", 3: "5M"}
-    market_cap_text = market_cap_levels.get(market_cap_level, "2M")
+    market_cap_levels = {1: "1M", 2: "2M", 3: "3M"}
+    market_cap_text = market_cap_levels.get(market_cap_level, "1M")
     
     # 預警次數
     alert_numbers = {
