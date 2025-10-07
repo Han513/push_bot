@@ -275,8 +275,6 @@ def evaluate_token_tiers(src: Dict[str, Any]) -> List[str]:
 
 
 def _tier_from_market_cap(market_cap: float) -> int:
-    if market_cap >= 5_000_000:
-        return 3
     if market_cap >= 3_000_000:
         return 2
     if market_cap >= 2_000_000:
@@ -342,10 +340,10 @@ async def try_push_token(session: aiohttp.ClientSession, src: Dict[str, Any]) ->
         recent_tokens = [a for a, ts in _address_to_first_push_ts.items() if _within_last_hour(ts)]
         unique_recent = set(recent_tokens)
 
-        # 升級策略：只能向更高等級推送；若已經是3則不再推
+        # 升級策略：只能向更高等級推送；最高到2級
         prev_level = _address_to_max_tier.get(address, 0)
-        if prev_level >= 3:
-            logger.debug(f"推送跳過: 已達最高等級3 address={address}")
+        if prev_level >= 2:
+            logger.debug(f"推送跳過: 已達最高等級2 address={address}")
             return
         if target_level <= prev_level:
             logger.debug(
