@@ -1769,10 +1769,17 @@ def format_premium_message(data: Dict, language: str = "en") -> str:
     else:
         highlight_line = ""
 
-    # 市值等級
-    market_cap_level = data.get('market_cap_level', 1)
+    # 市值等級（修正：容錯處理並確保為 1..2 的整數）
+    try:
+        market_cap_level = int(data.get('market_cap_level', 1))
+    except Exception:
+        market_cap_level = 1
+    if market_cap_level < 1:
+        market_cap_level = 1
+    if market_cap_level > 2:
+        market_cap_level = 2
     market_cap_levels = {1: "2M", 2: "3M"}
-    market_cap_text = market_cap_levels.get(market_cap_level, "1M")
+    market_cap_text = market_cap_levels.get(market_cap_level, "2M")
     
     # 預警次數
     alert_numbers = {
