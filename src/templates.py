@@ -1778,7 +1778,7 @@ def format_premium_message(data: Dict, language: str = "en") -> str:
         market_cap_level = 1
     if market_cap_level > 2:
         market_cap_level = 2
-    market_cap_levels = {1: "2M", 2: "3M"}
+    market_cap_levels = {1: "2M", 2: "5M"}
     market_cap_text = market_cap_levels.get(market_cap_level, "2M")
     
     # 預警次數

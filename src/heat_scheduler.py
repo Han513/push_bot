@@ -1,12 +1,13 @@
 import os
 import asyncio
 import logging
-from typing import List, Dict, Optional, Any
+from typing import List, Dict, Optional, Any, Set
 
 import aiohttp
 from dotenv import load_dotenv
 from logging_setup import setup_logging
 import time
+import random
 
 
 # 載入環境變數
@@ -28,7 +29,10 @@ ES_SORT_FIELD = os.getenv("ES_SORT_FIELD", "heat_score.m5")
 ES_SORT_ORDER = os.getenv("ES_SORT_ORDER", "desc")
 
 # 定時任務間隔（秒）
+# 若未指定單一定時間隔，將在 [3h,5h] 之間隨機
 FETCH_INTERVAL_SECONDS = int(os.getenv("HOT_TOKEN_FETCH_INTERVAL_SECONDS", "60"))
+FETCH_MIN_SECONDS = int(os.getenv("HOT_TOKEN_FETCH_MIN_SECONDS", str(3 * 3600)))
+FETCH_MAX_SECONDS = int(os.getenv("HOT_TOKEN_FETCH_MAX_SECONDS", str(5 * 3600)))
 DETAIL_MAX_TOKENS_PER_CYCLE = int(os.getenv("DETAIL_MAX_TOKENS_PER_CYCLE", "100"))
 DETAIL_CONCURRENCY = int(os.getenv("DETAIL_CONCURRENCY", "10"))
 
@@ -55,14 +59,25 @@ _address_to_max_tier: Dict[str, int] = {}
 _address_to_first_push_ts: Dict[str, float] = {}
 _UNIQUE_TOKENS_PER_HOUR_LIMIT = int(os.getenv("UNIQUE_TOKENS_PER_HOUR_LIMIT", "2"))
 RECENT_TOKEN_DAYS = int(os.getenv("RECENT_TOKEN_DAYS", "7"))
+_inflight_addresses: Set[str] = set()
+_push_gate_lock: asyncio.Lock = asyncio.Lock()
+_next_push_earliest_ts: float = 0.0
+
+# 推送抖動間隔（兩次推送之間的隨機間距），避免同時間集中推送
+PUSH_MIN_INTERVAL_SECONDS = int(os.getenv("PUSH_MIN_INTERVAL_SECONDS", "60"))
+PUSH_MAX_INTERVAL_SECONDS = int(os.getenv("PUSH_MAX_INTERVAL_SECONDS", "180"))
+REFRESH_BEFORE_PUSH = os.getenv("REFRESH_BEFORE_PUSH", "1") == "1"
 
 # 條件閥值（可用環境變數覆蓋）
-TIER1_TXNS = int(os.getenv("TIER1_TXNS", "200"))
-TIER1_VOL_USD = float(os.getenv("TIER1_VOL_USD", "50000"))
-TIER2_TXNS = int(os.getenv("TIER2_TXNS", "500"))
-TIER2_VOL_USD = float(os.getenv("TIER2_VOL_USD", "100000"))
+# 新規則：
+#  - 市值 ≥ 2M 且 5分成交筆數 ≥ 300 且 5分成交額 ≥ $80k
+#  - 市值 ≥ 5M 且 5分成交筆數 ≥ 800 且 5分成交額 ≥ $150k
+TIER1_TXNS = int(os.getenv("TIER1_TXNS", "300"))
+TIER1_VOL_USD = float(os.getenv("TIER1_VOL_USD", "80000"))
+TIER2_TXNS = int(os.getenv("TIER2_TXNS", "800"))
+TIER2_VOL_USD = float(os.getenv("TIER2_VOL_USD", "150000"))
 TIER3_TXNS = int(os.getenv("TIER3_TXNS", "800"))
-TIER3_VOL_USD = float(os.getenv("TIER3_VOL_USD", "200000"))
+TIER3_VOL_USD = float(os.getenv("TIER3_VOL_USD", "150000"))
 
 # 背景任務引用
 _scheduler_task: Optional[asyncio.Task] = None
@@ -114,8 +129,9 @@ def _is_solana_doc(doc_id: str) -> bool:
 
 
 def extract_solana_addresses(hits: List[Dict]) -> List[str]:
-    """由熱度表 hits 依序萃取 SOLANA 的 address，跳過 BSC。"""
+    """由熱度表 hits 依序萃取 SOLANA 的 address，跳過 BSC，並去重保持順序。"""
     addresses: List[str] = []
+    seen: Set[str] = set()
     for item in hits:
         doc_id = item.get("_id", "")
         if _is_bsc_doc(doc_id):
@@ -127,7 +143,10 @@ def extract_solana_addresses(hits: List[Dict]) -> List[str]:
         src = item.get("_source", {}) or {}
         address = src.get("address")
         if address:
-            addresses.append(str(address))
+            addr = str(address)
+            if addr not in seen:
+                seen.add(addr)
+                addresses.append(addr)
     return addresses
 
 
@@ -264,8 +283,7 @@ def evaluate_token_tiers(src: Dict[str, Any]) -> List[str]:
 
     tiers = [
         ("TIER_1", 2_000_000, TIER1_TXNS, TIER1_VOL_USD),
-        ("TIER_2", 3_000_000, TIER2_TXNS, TIER2_VOL_USD),
-        ("TIER_3", 5_000_000, TIER3_TXNS, TIER3_VOL_USD),
+        ("TIER_2", 5_000_000, TIER2_TXNS, TIER2_VOL_USD),
     ]
     matched: List[str] = []
     for name, cap_thr, tx_thr, vol_thr in tiers:
@@ -275,7 +293,7 @@ def evaluate_token_tiers(src: Dict[str, Any]) -> List[str]:
 
 
 def _tier_from_market_cap(market_cap: float) -> int:
-    if market_cap >= 3_000_000:
+    if market_cap >= 5_000_000:
         return 2
     if market_cap >= 2_000_000:
         return 1
@@ -288,6 +306,25 @@ def _now_ts() -> float:
 
 def _within_last_hour(ts: float) -> bool:
     return (_now_ts() - ts) < 3600
+
+
+async def _await_push_slot() -> None:
+    """全局推送閘：確保推送之間存在隨機時間間距，讓時間軸更自然。"""
+    global _next_push_earliest_ts
+    wait_seconds = 0.0
+    async with _push_gate_lock:
+        now = _now_ts()
+        if now < _next_push_earliest_ts:
+            wait_seconds = _next_push_earliest_ts - now
+        # 為下一次推送安排新的最早時間點（加入隨機抖動）
+        interval = random.randint(
+            min(PUSH_MIN_INTERVAL_SECONDS, PUSH_MAX_INTERVAL_SECONDS),
+            max(PUSH_MIN_INTERVAL_SECONDS, PUSH_MAX_INTERVAL_SECONDS),
+        )
+        base = max(_next_push_earliest_ts, now)
+        _next_push_earliest_ts = base + interval
+    if wait_seconds > 0:
+        await asyncio.sleep(wait_seconds)
 
 
 async def _post_premium_push(session: aiohttp.ClientSession, payload: Dict[str, Any]) -> bool:
@@ -310,6 +347,15 @@ async def try_push_token(session: aiohttp.ClientSession, src: Dict[str, Any]) ->
         if address in EXCLUDED_ADDRESSES:
             logger.debug(f"推送跳過: address 在排除清單")
         return False
+
+    # 可選：推送前刷新一次詳情，確保價格/市值使用最新數據
+    if REFRESH_BEFORE_PUSH:
+        try:
+            latest = await fetch_token_detail(session, address)
+            if latest:
+                src = latest
+        except Exception:
+            pass
 
     market_cap = _compute_market_cap_usd(src)
     target_level = _tier_from_market_cap(market_cap)
@@ -336,6 +382,10 @@ async def try_push_token(session: aiohttp.ClientSession, src: Dict[str, Any]) ->
 
     # 速率限制：1小時內最多推送2個不同代幣
     async with _push_lock:
+        # 若該地址正在推送中，避免重複推送
+        if address in _inflight_addresses:
+            logger.debug(f"推送跳過: address={address} 正在推送中")
+            return False
         # 清理過期的一小時窗口
         recent_tokens = [a for a, ts in _address_to_first_push_ts.items() if _within_last_hour(ts)]
         unique_recent = set(recent_tokens)
@@ -383,24 +433,29 @@ async def try_push_token(session: aiohttp.ClientSession, src: Dict[str, Any]) ->
             "open_time": created_at_sec,
             "token_price": price_usd,
         }
+        # 標記 in-flight，避免併發重複
+        _inflight_addresses.add(address)
 
     # 發送推送（不在鎖內）
+    # 全局節流：避免同時間集中推送
+    await _await_push_slot()
     ok = await _post_premium_push(session, payload)
-    if ok:
-        # 更新最高等級（加鎖）
-        async with _push_lock:
+    # 解除 in-flight 並根據結果更新狀態
+    async with _push_lock:
+        _inflight_addresses.discard(address)
+        if ok:
             _address_to_max_tier[address] = target_level
-        logger.info(
-            f"已推送: address={address}, level={target_level}, market_cap_usd={market_cap:.2f}"
-        )
-        return True
+            logger.info(
+                f"已推送: address={address}, level={target_level}, market_cap_usd={market_cap:.2f}"
+            )
+            return True
     return False
 
 
 async def _scheduler_loop() -> None:
     """定時任務：週期性拉取 SOLANA address。"""
     logger.info(
-        f"啟動熱度表定時任務：間隔 {FETCH_INTERVAL_SECONDS}s，索引 {ES_INDEX}，排序 {ES_SORT_FIELD} {ES_SORT_ORDER}"
+        f"啟動熱度表定時任務：間隔隨機 {FETCH_MIN_SECONDS}~{FETCH_MAX_SECONDS}s，索引 {ES_INDEX}，排序 {ES_SORT_FIELD} {ES_SORT_ORDER}"
     )
     timeout = aiohttp.ClientTimeout(total=30)
     async with aiohttp.ClientSession(timeout=timeout) as session:
@@ -442,6 +497,8 @@ async def _scheduler_loop() -> None:
                     batch = addresses[start_index:start_index + DETAIL_MAX_TOKENS_PER_CYCLE]
                     if not batch:
                         break
+                    # 打亂處理順序，讓命中/推送時間更加隨機
+                    random.shuffle(batch)
                     results = await asyncio.gather(*(process_address(a) for a in batch))
                     pushed_in_batch = sum(1 for r in results if r)
                     pushed_this_round += pushed_in_batch
@@ -451,7 +508,10 @@ async def _scheduler_loop() -> None:
                     logger.info("本輪未找到符合推送條件的代幣，已掃描完整清單或達到批次上限")
             except Exception as e:
                 logger.error(f"定時任務執行錯誤: {e}")
-            await asyncio.sleep(FETCH_INTERVAL_SECONDS)
+            # 每輪結束後在 3~5 小時（可用環境變數覆蓋）之間隨機等待
+            next_sleep = random.randint(min(FETCH_MIN_SECONDS, FETCH_MAX_SECONDS), max(FETCH_MIN_SECONDS, FETCH_MAX_SECONDS))
+            logger.info(f"下一輪抓取將在 {next_sleep} 秒後進行")
+            await asyncio.sleep(next_sleep)
 
 
 async def start_scheduler() -> None:
