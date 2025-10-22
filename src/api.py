@@ -8,6 +8,7 @@ from main import push_to_channel, format_message, init_bot
 from models import get_session, add_crypto_info, get_cached_wallets
 import os
 from dotenv import load_dotenv
+import redis
 from logging_setup import setup_logging
 import aiohttp
 from datetime import datetime, timezone, timedelta
@@ -41,6 +42,27 @@ ES_REQUEST_RETRIES = int(os.getenv("ES_REQUEST_RETRIES", "2"))
 SOLSCAN_REQUEST_RETRIES = int(os.getenv("SOLSCAN_REQUEST_RETRIES", "2"))
 ES_RETRY_BACKOFF = float(os.getenv("ES_RETRY_BACKOFF", "0.5"))
 SOLSCAN_RETRY_BACKOFF = float(os.getenv("SOLSCAN_RETRY_BACKOFF", "0.5"))
+
+# Redis（分佈式冪等）
+REDIS_HOST = os.getenv("REDIS_HOST")
+REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
+REDIS_PASSWORD = os.getenv("REDIS_PASSWORD")
+REDIS_DB = int(os.getenv("REDIS_DB", "0"))
+IDEMPOTENCY_TTL_SECONDS = int(os.getenv("IDEMPOTENCY_TTL_SECONDS", "600"))  # 普通推送冪等 10 分鐘
+_redis_client: Optional[redis.Redis] = None
+
+def get_redis() -> Optional[redis.Redis]:
+    global _redis_client
+    if _redis_client is None and REDIS_HOST:
+        _redis_client = redis.Redis(
+            host=REDIS_HOST,
+            port=REDIS_PORT,
+            password=REDIS_PASSWORD,
+            db=REDIS_DB,
+            decode_responses=True,
+            socket_timeout=2,
+        )
+    return _redis_client
 
 # 創建應用實例
 app = Quart(__name__)
@@ -143,6 +165,18 @@ async def token_processor():
                     chain = task['chain']
                     is_low_frequency = False
 
+                    # 高頻任務：增加分佈式處理柵欄，避免短時間重複處理同一 token
+                    try:
+                        r = get_redis()
+                        if r is not None:
+                            hf_key_ttl = max(60, min(600, IDEMPOTENCY_TTL_SECONDS))  # 1~10 分鐘
+                            hf_proc_key = f"hf:processing:{chain}:{token_address}"
+                            if not r.set(name=hf_proc_key, value="1", nx=True, ex=hf_key_ttl):
+                                logger.info(f"跳過高頻重複處理（processing 柵欄命中）: {chain} {token_address}")
+                                continue
+                    except Exception as e:
+                        logger.warning(f"高頻 processing 柵欄設置失敗（略過）：{e}")
+
                 # 檢查是否已經處理過
                 should_process = True
                 # async with processing_lock:
@@ -230,6 +264,16 @@ async def token_processor():
                                 await session.close()
                             except Exception:
                                 pass
+                        # 高頻 processing 柵欄：處理完畢後縮短 TTL，避免長時間佔用
+                        try:
+                            if task.get('type') != 'premium':
+                                r = get_redis()
+                                if r is not None:
+                                    hf_proc_key = f"hf:processing:{chain}:{token_address}"
+                                    # 將剩餘 TTL 調整為 30 秒，允許稍後再次處理
+                                    r.expire(hf_proc_key, 30)
+                        except Exception:
+                            pass
                     except Exception as e:
                         logger.error(f"處理代幣任務時發生錯誤: {e}")
 
@@ -1269,6 +1313,17 @@ async def tg_push():
                 })
             processed_tokens.add(token_address)
 
+        # 分佈式冪等：同一 token_address 在短時間內只允許一個入隊
+        try:
+            r = get_redis()
+            if r is not None:
+                idem_key = f"push:idemp:{chain}:{token_address}"
+                if not r.set(name=idem_key, value="1", nx=True, ex=IDEMPOTENCY_TTL_SECONDS):
+                    logger.info(f"忽略重覆請求（冪等鍵命中）: {chain} {token_address}")
+                    return jsonify({'status': 'success', 'message': 'Duplicate ignored by idempotency key'})
+        except Exception as e:
+            logger.warning(f"Redis 冪等檢查失敗（略過）: {e}")
+
         # 將任務添加到隊列
         logger.info(f"將代幣添加到處理隊列: chain={chain}, address={token_address}")
         with queue_lock:
@@ -1312,6 +1367,17 @@ async def tg_push_premium():
                 logger.info(f"Premium 去重：忽略非升級請求 address={address}, level={level}, prev={prev}")
                 return jsonify({'status': 'success', 'message': 'Duplicate (non-upgrade) premium request ignored'})
             premium_max_level[address] = level
+
+        # 分佈式冪等：同一 address+level 在 TTL 內只允許一個 premium 任務
+        try:
+            r = get_redis()
+            if r is not None:
+                idem_key = f"premium:idemp:{data.get('chain','SOLANA')}:{address}:{level}"
+                if not r.set(name=idem_key, value="1", nx=True, ex=max(IDEMPOTENCY_TTL_SECONDS, 3600)):
+                    logger.info(f"忽略重覆 premium 請求（冪等鍵命中）: {address} level={level}")
+                    return jsonify({'status': 'success', 'message': 'Duplicate premium ignored by idempotency key'})
+        except Exception as e:
+            logger.warning(f"Redis 冪等檢查失敗（略過）: {e}")
 
         # 將任務添加到隊列
         with queue_lock:

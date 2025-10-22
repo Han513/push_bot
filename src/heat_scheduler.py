@@ -5,6 +5,7 @@ from typing import List, Dict, Optional, Any, Set
 
 import aiohttp
 from dotenv import load_dotenv
+import redis
 from logging_setup import setup_logging
 import time
 import random
@@ -15,6 +16,29 @@ load_dotenv(override=True)
 setup_logging()
 
 logger = logging.getLogger(__name__)
+# Redis 配置（分佈式冪等）
+REDIS_HOST = os.getenv("REDIS_HOST")
+REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
+REDIS_PASSWORD = os.getenv("REDIS_PASSWORD")
+REDIS_DB = int(os.getenv("REDIS_DB", "0"))
+
+_redis_client: Optional[redis.Redis] = None
+
+def _get_redis() -> Optional[redis.Redis]:
+    global _redis_client
+    if _redis_client is None and REDIS_HOST:
+        _redis_client = redis.Redis(
+            host=REDIS_HOST,
+            port=REDIS_PORT,
+            password=REDIS_PASSWORD,
+            db=REDIS_DB,
+            decode_responses=True,
+            socket_timeout=2,
+        )
+    return _redis_client
+
+# 冪等鍵 TTL（秒）
+IDEMPOTENCY_TTL_SECONDS = int(os.getenv("IDEMPOTENCY_TTL_SECONDS", "3600"))
 
 
 # Elasticsearch 設定（可透過環境變數覆蓋）
@@ -379,6 +403,17 @@ async def try_push_token(session: aiohttp.ClientSession, src: Dict[str, Any]) ->
             f"推送跳過: 5m條件不足 address={address}, level={target_level}, txns={m5_txns}/{req_txns}, vol=${m5_volume:.0f}/${req_vol:.0f}"
         )
         return False
+
+    # 分佈式冪等鍵（跨進程）：確保相同地址與等級在 TTL 內只推一次
+    try:
+        r = _get_redis()
+        if r is not None:
+            idem_key = f"premium:idemp:SOL:{address}:{target_level}"
+            if not r.set(name=idem_key, value="1", nx=True, ex=IDEMPOTENCY_TTL_SECONDS):
+                logger.info(f"推送跳過: 冪等鍵命中 address={address}, level={target_level}")
+                return False
+    except Exception as e:
+        logger.warning(f"Redis 冪等檢查失敗（略過使用本地策略）: {e}")
 
     # 速率限制：1小時內最多推送2個不同代幣
     async with _push_lock:

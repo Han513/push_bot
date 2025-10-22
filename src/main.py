@@ -2,11 +2,14 @@ import os
 import json
 import httpx
 import logging
+import hashlib
+import time
 import asyncio
 import traceback
 from typing import Dict, Optional
 from dotenv import load_dotenv
 from logging_setup import setup_logging
+import redis
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, Bot
 from telegram.ext import Application, CommandHandler, ContextTypes, Defaults
 from telegram.error import NetworkError, TimedOut, RetryAfter
@@ -64,6 +67,25 @@ if not GROUP_ID or not TOPIC_ID:
 
 # 全局 bot 應用實例
 bot_app = None
+
+# 本地重複推送去重（僅進程內，避免網絡超時重試造成重複消息）
+DEDUP_WINDOW_SECONDS = int(os.getenv("DEDUP_WINDOW_SECONDS", "180"))
+_recent_send_keys = {}
+
+def _make_dedupe_key(chat_id: str, thread_id: str, message: str) -> str:
+    sha = hashlib.sha256(message.encode("utf-8")).hexdigest()[:16]
+    return f"{chat_id}:{thread_id or ''}:{sha}"
+
+def _should_skip_duplicate(key: str) -> bool:
+    now = time.time()
+    # 清理過期
+    expired = [k for k, ts in _recent_send_keys.items() if now - ts > DEDUP_WINDOW_SECONDS]
+    for k in expired:
+        _recent_send_keys.pop(k, None)
+    if key in _recent_send_keys and now - _recent_send_keys[key] <= DEDUP_WINDOW_SECONDS:
+        return True
+    _recent_send_keys[key] = now
+    return False
 
 def init_bot():
     """初始化 bot 應用"""
@@ -128,6 +150,8 @@ async def push_to_channel(
     target_chat_id: Optional[str] = None,
     target_group_id: Optional[str] = None,
     target_topic_id: Optional[str] = None,
+    max_send_retries: int = 3,
+    token_address_override: Optional[str] = None,
 ) -> bool:
     """推送消息到指定頻道或主題，带有重试机制"""
     should_close_session = False
@@ -164,15 +188,70 @@ async def push_to_channel(
             logger.error("未設置頻道 ID 或群組 ID，無法推送消息")
             return False
 
-        # 從消息中提取 token_address
-        token_address = None
-        for line in message.split('\n'):
-            if '<code>' in line and '</code>' in line:
-                # 提取 <code> 標籤中的內容
-                start = line.find('<code>') + 6
-                end = line.find('</code>')
-                token_address = line[start:end].strip()
-                break
+        # 去重：在發送前做本地去重，防止網路超時導致重試重複
+        dedupe_key = _make_dedupe_key(resolved_chat_id, resolved_topic_id if USE_TOPIC else None, message)
+        if _should_skip_duplicate(dedupe_key):
+            logger.info(f"跳過重複消息（去重命中） chat={resolved_chat_id} thread={resolved_topic_id if USE_TOPIC else ''}")
+            return True
+
+        # 取得 token_address（優先使用透傳參數，其次從訊息解析）
+        token_address = (token_address_override or '').strip() or None
+        if token_address is None:
+            for line in message.split('\n'):
+                if '<code>' in line and '</code>' in line:
+                    # 提取 <code> 標籤中的內容
+                    start = line.find('<code>') + 6
+                    end = line.find('</code>')
+                    token_address = line[start:end].strip()
+                    break
+
+        # 分佈式冪等：同一 chat/thread 在 TTL 內只發一次（優先以 token，否則以 message hash）
+        try:
+            REDIS_HOST = os.getenv("REDIS_HOST")
+            if REDIS_HOST:
+                r = getattr(push_to_channel, "_redis_client", None)
+                if r is None:
+                    r = redis.Redis(
+                        host=REDIS_HOST,
+                        port=int(os.getenv("REDIS_PORT", "6379")),
+                        password=os.getenv("REDIS_PASSWORD"),
+                        db=int(os.getenv("REDIS_DB", "0")),
+                        decode_responses=True,
+                        socket_timeout=2,
+                    )
+                    setattr(push_to_channel, "_redis_client", r)
+                chat_dedupe_ttl = int(os.getenv("CHAT_DEDUP_TTL_SECONDS", "300"))
+                # 使用 token_address 作為主鍵，缺失時退回 message hash
+                if token_address:
+                    unique_id = token_address
+                    chat_key = f"chatpush:idemp:{resolved_chat_id}:{resolved_topic_id or '0'}:{token_address}"
+                else:
+                    # Fallback：以 message hash 去重，避免模板偶發缺少 <code>
+                    msg_hash = hashlib.sha256(message.encode("utf-8")).hexdigest()[:16]
+                    unique_id = msg_hash
+                    chat_key = f"chatpush:msghash:{resolved_chat_id}:{resolved_topic_id or '0'}:{msg_hash}"
+                # 已發布標記（僅在成功後設置），用於避免同一次呼叫內因網路超時而二次發送
+                published_key = f"chatpush:published:{resolved_chat_id}:{resolved_topic_id or '0'}:{unique_id}"
+                # message_id 緩存鍵（成功後設置）
+                msgid_key = f"chatpush:msgid:{resolved_chat_id}:{resolved_topic_id or '0'}:{unique_id}"
+                # 若已發布，直接略過
+                try:
+                    if r.exists(published_key):
+                        logger.info(
+                            f"跳過重複消息（已發布標記命中） chat={resolved_chat_id} thread={resolved_topic_id if USE_TOPIC else ''} key={published_key}"
+                        )
+                        return True
+                except Exception:
+                    pass
+                # 任務級冪等：短時間內相同 chat/thread+token 僅允許一次入場
+                if not r.set(name=chat_key, value="1", nx=True, ex=chat_dedupe_ttl):
+                    logger.info(
+                        f"跳過重複消息（Redis 冪等命中） chat={resolved_chat_id} thread={resolved_topic_id if USE_TOPIC else ''} key={chat_key}"
+                    )
+                    return True
+        except Exception:
+            # 忽略 Redis 失敗，繼續後續流程
+            pass
 
         # 構建交易鏈接
         trade_url = f"https://www.bydfi.com/en/moonx/solana/token?address={token_address}"
@@ -191,8 +270,8 @@ async def push_to_channel(
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
-        # 添加重試機制
-        max_retries = 3
+        # 添加重試機制（premium 可降低重試次數以避免偶發重複）
+        max_retries = max(1, int(max_send_retries))
         retry_delay = 2
         success = False
         error_message = None
@@ -215,10 +294,32 @@ async def push_to_channel(
                     message_params['message_thread_id'] = int(resolved_topic_id)
                 
                 # 發送消息
-                await bot.send_message(**message_params)
+                sent_msg = await bot.send_message(**message_params)
 
                 log_message = f"消息已發送到{'主題 ' + resolved_topic_id + ' 在群組 ' + resolved_chat_id if USE_TOPIC else '頻道 ' + resolved_chat_id}"
                 # logger.info(log_message)
+                # 發送成功後，打上已發布標記，避免因隨後的超時/網路錯誤而重複發送
+                try:
+                    if REDIS_HOST:
+                        # 使用前面計算的 published_key；若未定義則臨時生成一次
+                        if 'published_key' not in locals():
+                            ident = token_address or hashlib.sha256(message.encode("utf-8")).hexdigest()[:16]
+                            published_key = f"chatpush:published:{resolved_chat_id}:{resolved_topic_id or '0'}:{ident}"
+                        r = getattr(push_to_channel, "_redis_client", None)
+                        if r is not None:
+                            r.set(name=published_key, value="1", ex=chat_dedupe_ttl)
+                            # 緩存 message_id 以供之後重試檢查
+                            try:
+                                msg_id_val = getattr(sent_msg, 'message_id', None)
+                                if msg_id_val is not None:
+                                    if 'msgid_key' not in locals():
+                                        ident = token_address or hashlib.sha256(message.encode("utf-8")).hexdigest()[:16]
+                                        msgid_key = f"chatpush:msgid:{resolved_chat_id}:{resolved_topic_id or '0'}:{ident}"
+                                    r.set(name=msgid_key, value=str(msg_id_val), ex=chat_dedupe_ttl)
+                            except Exception:
+                                pass
+                except Exception:
+                    pass
                 success = True
                 break  # 成功發送，跳出重試循環
 
@@ -227,6 +328,22 @@ async def push_to_channel(
                 error_message = f"網絡錯誤: {str(e)}"
                 target_desc = f"主題 {resolved_topic_id} 在群組 {resolved_chat_id}" if USE_TOPIC else f"頻道 {resolved_chat_id}"
                 logger.warning(f"第 {attempt+1} 次嘗試發送消息失敗[{target_desc}]: {error_message}，等待 {retry_delay} 秒後重試")
+                # 若前一次其實已成功送達（但回應超時），則已發布標記會存在，此時直接停止重試避免重複
+                try:
+                    if REDIS_HOST:
+                        if 'published_key' not in locals():
+                            ident = token_address or hashlib.sha256(message.encode("utf-8")).hexdigest()[:16]
+                            published_key = f"chatpush:published:{resolved_chat_id}:{resolved_topic_id or '0'}:{ident}"
+                        if 'msgid_key' not in locals():
+                            ident = token_address or hashlib.sha256(message.encode("utf-8")).hexdigest()[:16]
+                            msgid_key = f"chatpush:msgid:{resolved_chat_id}:{resolved_topic_id or '0'}:{ident}"
+                        r = getattr(push_to_channel, "_redis_client", None)
+                        if r is not None and (r.exists(published_key) or r.exists(msgid_key)):
+                            logger.info(f"檢測到已發布（published/msgid）標記，停止重試以避免重複：{published_key} | {msgid_key}")
+                            success = True
+                            break
+                except Exception:
+                    pass
                 await asyncio.sleep(retry_delay)
                 retry_delay *= 2  # 指數退避策略
 
@@ -276,6 +393,13 @@ async def push_to_all_language_channels(context: ContextTypes.DEFAULT_TYPE, cryp
 
     # 構造併發任務
     send_jobs = []  # (key, coroutine)
+    visited_targets = set()  # 去重目標: "chat_id:thread_id"
+
+    def normalize_chat(group_id: Optional[str]) -> Optional[str]:
+        if not group_id:
+            return None
+        gid = str(group_id)
+        return gid if gid.startswith("-100") else f"-100{gid}"
 
     # 1) 多語言主題
     for language, target in language_groups.items():
@@ -289,6 +413,12 @@ async def push_to_all_language_channels(context: ContextTypes.DEFAULT_TYPE, cryp
             # 無有效目標，跳過
             results[language] = False
             continue
+        norm_chat = normalize_chat(group_id)
+        target_key = f"{norm_chat}:{topic_id}"
+        if target_key in visited_targets:
+            # 同一輪內去重，避免 premium 情況下同一 chat/thread 重覆
+            continue
+        visited_targets.add(target_key)
         msg = format_premium_message(crypto_data, language) if is_low_frequency else format_message(crypto_data, language)
         send_jobs.append((language, push_to_channel(
             context,
@@ -298,11 +428,13 @@ async def push_to_all_language_channels(context: ContextTypes.DEFAULT_TYPE, cryp
             language=language,
             target_group_id=group_id,
             target_topic_id=topic_id,
+            max_send_retries=(1 if is_low_frequency else 3),
+            token_address_override=str(crypto_data.get("token_address") or crypto_data.get("contract_address") or "").strip(),
         )))
 
     # 2) 額外頻道（API）
     additional_channels = await get_additional_channels()
-    print(f"additional_channels: {additional_channels}")
+    logger.info(f"additional_channels fetched: high={len(additional_channels.get('high_freq', []))}, low={len(additional_channels.get('low_freq', []))}")
     extra_type = "low_freq" if is_low_frequency else "high_freq"
     extra_channels = additional_channels.get(extra_type, [])
     for channel in extra_channels:
@@ -312,6 +444,13 @@ async def push_to_all_language_channels(context: ContextTypes.DEFAULT_TYPE, cryp
                 topic_id = channel.get("topic_id")
                 lang = (channel.get("language") or "en").lower()
                 if group_id and topic_id:
+                    norm_chat = normalize_chat(group_id)
+                    target_key = f"{norm_chat}:{topic_id}"
+                    if target_key in visited_targets:
+                        # 與語言主題重疊時去重
+                        logger.info(f"skip duplicate extra channel target in same round: {target_key}")
+                        continue
+                    visited_targets.add(target_key)
                     msg = format_premium_message(crypto_data, lang) if is_low_frequency else format_message(crypto_data, lang)
                     key = f"extra_{group_id}_{topic_id}"
                     send_jobs.append((key, push_to_channel(
@@ -322,11 +461,18 @@ async def push_to_all_language_channels(context: ContextTypes.DEFAULT_TYPE, cryp
                         language=lang,
                         target_group_id=group_id,
                         target_topic_id=topic_id,
+                        max_send_retries=(1 if is_low_frequency else 3),
+                        token_address_override=str(crypto_data.get("token_address") or crypto_data.get("contract_address") or "").strip(),
                     )))
             else:
                 # 非字典，視為直接 chat_id
                 chat_id = str(channel)
                 lang = "en"
+                target_key = f"{chat_id}:0"
+                if target_key in visited_targets:
+                    logger.info(f"skip duplicate direct chat target in same round: {target_key}")
+                    continue
+                visited_targets.add(target_key)
                 msg = format_premium_message(crypto_data, lang) if is_low_frequency else format_message(crypto_data, lang)
                 key = f"extra_{chat_id}"
                 send_jobs.append((key, push_to_channel(
@@ -336,6 +482,8 @@ async def push_to_all_language_channels(context: ContextTypes.DEFAULT_TYPE, cryp
                     session=None,
                     language=lang,
                     target_chat_id=chat_id,
+                    max_send_retries=(1 if is_low_frequency else 3),
+                    token_address_override=str(crypto_data.get("token_address") or crypto_data.get("contract_address") or "").strip(),
                 )))
         except Exception:
             # 忽略單一構建錯誤
